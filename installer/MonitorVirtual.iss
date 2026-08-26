@@ -5,7 +5,8 @@
 #define MyAppName "Monitor Virtual para Holyrics"
 #define MyAppShortName "Monitor Virtual"
 #define MyAppVersion "0.1.0"
-#define MyAppPublisher "Monitor Virtual"
+#define MyAppPublisher "Wilson Lima"
+#define MyAppUrl "https://github.com/wilsonllucena/monitor-virtual-holyrics"
 #define MyAppExe "MonitorVirtual.exe"
 
 [Setup]
@@ -13,6 +14,16 @@ AppId={{B7C2F1A4-6E3D-4B58-9A21-8F5D0C7E9A31}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppUrl}
+AppSupportURL={#MyAppUrl}/issues
+AppUpdatesURL={#MyAppUrl}/releases
+; metadados exigidos para assinatura de código (SignPath Foundation)
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription=Instalador do {#MyAppName}
+VersionInfoCopyright=Copyright (C) 2026 Wilson Lima
 DefaultDirName={autopf}\MonitorVirtual
 DefaultGroupName={#MyAppShortName}
 DisableProgramGroupPage=yes

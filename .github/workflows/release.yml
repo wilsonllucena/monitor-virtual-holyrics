@@ -1,0 +1,76 @@
+name: release
+
+# Publica o instalador numa release. Quando a assinatura pela SignPath Foundation
+# estiver aprovada e configurada, o mesmo fluxo passa a anexar o instalador ASSINADO.
+#
+# Para ativar a assinatura, defina no repositório:
+#   Variables (Settings > Secrets and variables > Actions > Variables)
+#     SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG, SIGNPATH_SIGNING_POLICY_SLUG
+#   Secrets
+#     SIGNPATH_API_TOKEN
+# Sem essas variáveis o fluxo continua funcionando e publica o instalador não assinado.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Solicitar assinatura à SignPath
+        id: signpath
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ needs.build.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist
+
+      - name: Baixar o instalador não assinado
+        if: vars.SIGNPATH_ORGANIZATION_ID == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: instalador
+          path: dist
+
+      - name: Anexar à release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = if ($env:GITHUB_REF -like 'refs/tags/*') {
+            $env:GITHUB_REF -replace '^refs/tags/', ''
+          } else {
+            'v0.0.0-dev'
+          }
+
+          $assinado = '${{ vars.SIGNPATH_ORGANIZATION_ID }}' -ne ''
+          Write-Host "Tag: $tag · instalador assinado: $assinado"
+
+          $exe = Get-ChildItem dist -Filter '*.exe' -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Instalador não encontrado.' }
+
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --generate-notes
+          }
+
+          gh release upload $tag $exe.FullName --clobber

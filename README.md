@@ -1,5 +1,8 @@
 # Monitor Virtual para Holyrics
 
+[![build](https://github.com/wilsonllucena/monitor-virtual-holyrics/actions/workflows/build.yml/badge.svg)](https://github.com/wilsonllucena/monitor-virtual-holyrics/actions/workflows/build.yml)
+[![licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)](LICENSE)
+
 **Projete o Holyrics numa tela a mais sem ter saída de vídeo sobrando na placa.**
 
 Este programa cria um **monitor virtual** no Windows 10/11. Para o Windows — e para o
@@ -110,9 +113,10 @@ abra o menu do ícone e clique em **Ligar monitor virtual** de novo.
 Menu do ícone → **Reparar / reinstalar driver**.
 
 **O antivírus ou o SmartScreen reclamou**
-O executável ainda não é assinado com certificado pago. O código é aberto e o driver
-embalado é assinado digitalmente (SignPath Foundation) — dá para conferir tudo neste
-repositório.
+O executável ainda não é assinado com certificado digital. O código é aberto, o instalador
+é gerado automaticamente pelo GitHub Actions a partir dele, e o driver embalado é assinado
+digitalmente (SignPath Foundation) — veja a
+[política de assinatura de código](CODE_SIGNING_POLICY.md).
 
 **Quero remover tudo**
 Painel de Controle → Programas → **Monitor Virtual para Holyrics** → Desinstalar. Ele
@@ -174,6 +178,17 @@ mvcli watch           # watchdog em primeiro plano
 ```powershell
 MonitorVirtualSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
 ```
+
+## Assinatura de código e privacidade
+
+Os instaladores são gerados por **GitHub Actions** a partir do código deste repositório —
+nunca da máquina de um desenvolvedor. A candidatura à assinatura gratuita da
+**SignPath Foundation** foi enviada; até a aprovação, os binários não são assinados e o
+SmartScreen avisa. Detalhes em [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
+
+**O programa não coleta nem envia dado nenhum.** Sem telemetria, sem conta, sem servidor.
+As únicas coisas gravadas são a configuração e os logs locais, em
+`%ProgramData%\MonitorVirtual\`, removidos na desinstalação.
 
 ## Contribuindo
 

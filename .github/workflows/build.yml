@@ -1,0 +1,82 @@
+name: build
+
+# Build automatizado e verificável: é o que permite provar que o instalador publicado
+# saiu deste código-fonte (exigência da SignPath Foundation para assinatura gratuita).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      artifact-id:
+        description: "ID do artefato com o instalador (usado pela assinatura)"
+        value: ${{ jobs.build.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Conferir a assinatura do catálogo do driver
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature driver\mttvdd.cat
+          Write-Host "Status : $($sig.Status)"
+          Write-Host "Signer : $($sig.SignerCertificate.Subject)"
+          Write-Host "Válido até: $($sig.SignerCertificate.NotAfter)"
+          if ($sig.Status -ne 'Valid') {
+            throw "Catálogo do driver com assinatura inválida ($($sig.Status))."
+          }
+
+      - name: Compilar e publicar
+        shell: pwsh
+        run: ./tools/build.ps1
+
+      - name: Garantir o Inno Setup
+        shell: pwsh
+        run: |
+          $paths = @(
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          )
+          if (-not ($paths | Where-Object { Test-Path $_ })) {
+            Write-Host "Inno Setup ausente na imagem; instalando via Chocolatey."
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Gerar o instalador
+        shell: pwsh
+        run: ./tools/build-installer.ps1 -SkipBuild
+
+      - name: Listar o que foi gerado
+        shell: pwsh
+        run: |
+          Get-ChildItem dist, publish -File |
+            Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}} |
+            Format-Table -AutoSize
+
+      - name: Publicar artefato
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
