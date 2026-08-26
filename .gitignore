@@ -1,0 +1,15 @@
+# build .NET
+bin/
+obj/
+publish/
+dist/
+*.user
+*.suo
+
+# ferramentas locais
+.vs/
+.idea/
+.claude/
+
+# saídas temporárias
+*.log

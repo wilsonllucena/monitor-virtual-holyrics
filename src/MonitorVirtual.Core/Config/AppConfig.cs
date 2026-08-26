@@ -1,0 +1,137 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using MonitorVirtual.Core.Apps;
+using MonitorVirtual.Core.Logging;
+
+namespace MonitorVirtual.Core.Config;
+
+public enum MonitorSide
+{
+    Direita = 0,
+    Esquerda = 1,
+}
+
+/// <summary>Estado desejado do monitor virtual. Persistido em %ProgramData%\MonitorVirtual\config.json.</summary>
+public sealed class AppConfig
+{
+    /// <summary>Se true, o monitor virtual deve estar presente e ativo.</summary>
+    public bool Enabled { get; set; } = true;
+
+    public int Width { get; set; } = 1920;
+    public int Height { get; set; } = 1080;
+    public int RefreshRate { get; set; } = 60;
+
+    /// <summary>Onde o monitor virtual fica no desktop estendido, em relação ao primário.</summary>
+    public MonitorSide Side { get; set; } = MonitorSide.Direita;
+
+    /// <summary>Força topologia "Estender" (Win+P) sempre que reconciliar.</summary>
+    public bool ForceExtend { get; set; } = true;
+
+    /// <summary>Garante que o monitor virtual nunca seja o primário.</summary>
+    public bool NeverPrimary { get; set; } = true;
+
+    /// <summary>Watchdog: intervalo de reconciliação em segundos (0 desliga).</summary>
+    public int WatchdogSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Programas que consomem o monitor virtual (Holyrics, Resolume Arena, OBS...).
+    /// Todos precisam abrir depois que o monitor está pronto.
+    /// </summary>
+    public List<ManagedApp> ManagedApps { get; set; } = new();
+
+    // --- campos legados, mantidos só para migrar config.json antigo ---
+    public bool LaunchHolyrics { get; set; }
+    public string? HolyricsPath { get; set; }
+    public bool AutoRestartHolyrics { get; set; }
+
+    /// <summary>Taxa de atualização da janela de visualização do monitor virtual.</summary>
+    public int PreviewFps { get; set; } = 15;
+
+    /// <summary>API local do Holyrics (Configurações → API Server). Usada só para status.</summary>
+    public int HolyricsApiPort { get; set; } = 8091;
+
+    public string? HolyricsApiToken { get; set; }
+
+    public bool StartWithWindows { get; set; } = true;
+
+    [JsonIgnore]
+    public string ResolutionText => $"{Width}x{Height} @ {RefreshRate}Hz";
+
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    public static AppConfig Load()
+    {
+        try
+        {
+            if (File.Exists(AppPaths.ConfigFile))
+            {
+                var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(AppPaths.ConfigFile), JsonOpts);
+                if (cfg is not null) return cfg.Normalized();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Falha ao ler config.json, usando padrões", ex);
+        }
+
+        return new AppConfig();
+    }
+
+    public void Save()
+    {
+        try
+        {
+            AppPaths.EnsureDataDirs();
+            File.WriteAllText(AppPaths.ConfigFile, JsonSerializer.Serialize(Normalized(), JsonOpts));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Log.Error("Sem permissão para gravar config.json — rode o Monitor Virtual " +
+                      "(ou este comando) como Administrador uma vez para corrigir as permissões", ex);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Falha ao gravar config.json", ex);
+        }
+    }
+
+    private AppConfig Normalized()
+    {
+        if (Width < 640) Width = 640;
+        if (Height < 480) Height = 480;
+        if (RefreshRate < 24) RefreshRate = 60;
+        if (WatchdogSeconds is not 0 and < 2) WatchdogSeconds = 2;
+
+        MigrateHolyricsFields();
+        return this;
+    }
+
+    /// <summary>Converte a configuração antiga (só Holyrics) na lista de programas.</summary>
+    private void MigrateHolyricsFields()
+    {
+        if (string.IsNullOrWhiteSpace(HolyricsPath)) return;
+        if (ManagedApps.Any(a => string.Equals(a.ExePath, HolyricsPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            HolyricsPath = null;
+            return;
+        }
+
+        ManagedApps.Add(new ManagedApp
+        {
+            Name = "Holyrics",
+            ExePath = HolyricsPath!,
+            ProcessName = "Holyrics",
+            LaunchAfterMonitor = LaunchHolyrics,
+            AutoRestartIfEarly = AutoRestartHolyrics,
+        });
+
+        HolyricsPath = null;
+    }
+
+    public AppConfig Clone() =>
+        JsonSerializer.Deserialize<AppConfig>(JsonSerializer.Serialize(this, JsonOpts), JsonOpts)!;
+}
