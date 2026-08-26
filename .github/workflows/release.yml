@@ -51,26 +51,49 @@ jobs:
           name: instalador
           path: dist
 
+      - name: Conferir o instalador
+        id: exe
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Filter '*.exe' -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Instalador não encontrado.' }
+
+          $assinatura = Get-AuthenticodeSignature $exe.FullName
+          $configurado = '${{ vars.SIGNPATH_ORGANIZATION_ID }}' -ne ''
+
+          Write-Host "Arquivo   : $($exe.Name) ($([math]::Round($exe.Length/1MB,1)) MB)"
+          Write-Host "SignPath  : $(if ($configurado) { 'configurado' } else { 'não configurado' })"
+          Write-Host "Assinatura: $($assinatura.Status)"
+          if ($assinatura.SignerCertificate) {
+            Write-Host "Assinante : $($assinatura.SignerCertificate.Subject)"
+          }
+
+          if ($configurado -and $assinatura.Status -ne 'Valid') {
+            throw "SignPath está configurado, mas o instalador voltou sem assinatura válida ($($assinatura.Status))."
+          }
+
+          "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+
       - name: Anexar à release
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = if ($env:GITHUB_REF -like 'refs/tags/*') {
-            $env:GITHUB_REF -replace '^refs/tags/', ''
-          } else {
-            'v0.0.0-dev'
-          }
-
-          $assinado = '${{ vars.SIGNPATH_ORGANIZATION_ID }}' -ne ''
-          Write-Host "Tag: $tag · instalador assinado: $assinado"
-
-          $exe = Get-ChildItem dist -Filter '*.exe' -Recurse | Select-Object -First 1
-          if (-not $exe) { throw 'Instalador não encontrado.' }
+          $tag = $env:GITHUB_REF -replace '^refs/tags/', ''
+          Write-Host "Publicando na release $tag"
 
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --title $tag --generate-notes
           }
 
-          gh release upload $tag $exe.FullName --clobber
+          gh release upload $tag '${{ steps.exe.outputs.path }}' --clobber
+
+      - name: Aviso (execução manual)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        run: |
+          Write-Host "Execução manual: nada foi publicado."
+          Write-Host "O instalador está nos artefatos desta execução."
+          Write-Host "Para publicar de verdade, crie a tag: git tag v0.1.1 && git push origin v0.1.1"
