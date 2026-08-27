@@ -47,10 +47,17 @@ public sealed class AppConfig
     /// <summary>Taxa de atualização da janela de visualização do monitor virtual.</summary>
     public int PreviewFps { get; set; } = 15;
 
-    /// <summary>API local do Holyrics (Configurações → API Server). Usada só para status.</summary>
+    /// <summary>API local do Holyrics (Configurações → API Server).</summary>
     public int HolyricsApiPort { get; set; } = 8091;
 
     public string? HolyricsApiToken { get; set; }
+
+    /// <summary>
+    /// O NDI do Holyrics (v2.29+) sai com fundo transparente por padrão — só a letra.
+    /// No Resolume isso vira xadrez no preview e preto na composition. Quando true,
+    /// desligamos <c>transparent_background</c> via API para o papel de fundo ir junto.
+    /// </summary>
+    public bool HolyricsIncludeNdiBackground { get; set; } = true;
 
     public bool StartWithWindows { get; set; } = true;
 

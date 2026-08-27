@@ -2,6 +2,7 @@ using Microsoft.Win32;
 using MonitorVirtual.Core;
 using MonitorVirtual.Core.Apps;
 using MonitorVirtual.Core.Config;
+using MonitorVirtual.Core.Holyrics;
 using MonitorVirtual.Core.Logging;
 using MonitorVirtual.Core.Provisioning;
 using MonitorVirtual.Core.Startup;
@@ -27,6 +28,9 @@ internal sealed class TrayApp : ApplicationContext
 
     private readonly HashSet<string> _launched = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _needsRestart = new(StringComparer.OrdinalIgnoreCase);
+    private bool _ndiBackgroundApplied;
+    private bool _ndiBackgroundInFlight;
+    private int _ndiBackgroundFailures;
 
     public TrayApp(bool background, bool openPreview = false)
     {
@@ -147,6 +151,59 @@ internal sealed class TrayApp : ApplicationContext
 
         MaybeLaunchApps(status);
         CheckAppOrdering(status, wasActive, silent);
+        MaybeFixHolyricsNdi(silent);
+    }
+
+    /// <summary>
+    /// O NDI nativo do Holyrics (v2.29+) manda só a camada de texto com alpha.
+    /// O Resolume pinta o resto de preto. Pedimos à API para incluir o fundo.
+    /// </summary>
+    private void MaybeFixHolyricsNdi(bool silent)
+    {
+        if (!_config.HolyricsIncludeNdiBackground || _ndiBackgroundApplied || _ndiBackgroundInFlight)
+            return;
+        if (string.IsNullOrWhiteSpace(_config.HolyricsApiToken))
+            return;
+        if (!HolyricsClient.IsRunning())
+            return;
+
+        _ndiBackgroundInFlight = true;
+        var cfg = _config.Clone();
+
+        Task.Run(async () =>
+        {
+            HolyricsNdiFixResult result;
+            try
+            {
+                result = await new HolyricsClient().EnsureOpaqueNdiBackgroundAsync(cfg);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Falha ao ajustar o NDI do Holyrics", ex);
+                result = new HolyricsNdiFixResult(0, 0, ex.Message, Array.Empty<HolyricsNdiOutput>());
+            }
+
+            _marshal.BeginInvoke(() =>
+            {
+                _ndiBackgroundInFlight = false;
+                if (!result.Ok)
+                {
+                    _ndiBackgroundFailures++;
+                    Log.Warn($"NDI do Holyrics não ajustado: {result.Error}");
+                    if (_ndiBackgroundFailures >= 3)
+                        _ndiBackgroundApplied = true;
+                    return;
+                }
+
+                _ndiBackgroundApplied = true;
+                if (result.Changed > 0 && !silent)
+                    Notify(
+                        result.Changed == 1
+                            ? "NDI do Holyrics: papel de fundo ligado (Resolume não fica mais só com a letra)."
+                            : $"NDI do Holyrics: papel de fundo ligado em {result.Changed} saídas.",
+                        ToolTipIcon.Info);
+            });
+        });
     }
 
     /// <summary>
@@ -303,6 +360,8 @@ internal sealed class TrayApp : ApplicationContext
 
         _config = form.Result;
         _config.Save();
+        _ndiBackgroundApplied = false;
+        _ndiBackgroundFailures = 0;
 
         _watchdog.Stop();
         if (_config.WatchdogSeconds > 0)

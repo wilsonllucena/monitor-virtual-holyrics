@@ -165,6 +165,40 @@ switch (command)
         Console.WriteLine($"Processo em execução: {(st.ProcessRunning ? "sim" : "não")}");
         Console.WriteLine($"API acessível: {(st.ApiReachable ? "sim" : "não")} ({st.Detail})");
         Console.WriteLine($"Caminho detectado: {HolyricsClient.Autodetect() ?? "não encontrado"}");
+
+        if (st.ApiReachable)
+        {
+            var outputs = await client.ListNdiAsync(cfg);
+            if (outputs.Count == 0)
+            {
+                Console.WriteLine("NDI: nenhuma saída (Holyrics 2.29+).");
+            }
+            else
+            {
+                foreach (var ndi in outputs)
+                {
+                    Console.WriteLine(
+                        $"NDI {(ndi.Enabled ? "ligado" : "desligado"),-8} " +
+                        $"fundo={(ndi.TransparentBackground ? "transparente" : "opaco"),-13} " +
+                        $"{ndi.Name ?? ndi.Id}");
+                }
+            }
+
+            if (args.Any(a => a.Equals("--ndi-fundo", StringComparison.OrdinalIgnoreCase)))
+            {
+                var fix = await client.EnsureOpaqueNdiBackgroundAsync(cfg);
+                if (!fix.Ok)
+                {
+                    Console.Error.WriteLine("Não foi possível incluir o papel de fundo no NDI: " + fix.Error);
+                    return 1;
+                }
+
+                Console.WriteLine(fix.Changed > 0
+                    ? $"Papel de fundo ligado em {fix.Changed} saída(s) NDI."
+                    : "Saídas NDI já estavam com fundo opaco.");
+            }
+        }
+
         return 0;
     }
 
@@ -204,7 +238,7 @@ switch (command)
               watch                       roda o watchdog em primeiro plano
               apps [--detect]             lista (e detecta) os programas que usam o monitor
               launch                      abre os programas configurados, se o monitor estiver ativo
-              holyrics                    testa a detecção e a API do Holyrics
+              holyrics [--ndi-fundo]      testa a API; --ndi-fundo inclui o papel de fundo no NDI
               startup-on | startup-off    início automático elevado no logon
             """);
         return 0;
