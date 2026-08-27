@@ -112,6 +112,11 @@ abra o menu do ícone e clique em **Ligar monitor virtual** de novo.
 **Depois de uma atualização grande do Windows a tela sumiu**
 Menu do ícone → **Reparar / reinstalar driver**.
 
+**O instalador terminou com "CreateProcess falhou; código 740"**
+A versão 0.1.0 tentava abrir `MonitorVirtual.exe` no token não-elevado do assistente.
+Atualize para **0.1.1** (este repositório). Se ainda tiver a 0.1.0 instalada, abra
+**Monitor Virtual** pelo menu Iniciar — o Windows pede UAC e o app sobe.
+
 **O antivírus ou o SmartScreen reclamou**
 O executável ainda não é assinado com certificado digital. O código é aberto, o instalador
 é gerado automaticamente pelo GitHub Actions a partir dele, e o driver embalado é assinado
@@ -143,12 +148,27 @@ Detalhes de arquitetura, decisões e resultados dos testes em [DESIGN.md](DESIGN
 
 ## Para desenvolvedores
 
-```powershell
-winget install Microsoft.DotNet.SDK.8
-powershell -ExecutionPolicy Bypass -File tools\build.ps1            # gera publish\
-winget install JRSoftware.InnoSetup
-powershell -ExecutionPolicy Bypass -File tools\build-installer.ps1  # gera dist\
-```
+Tudo abaixo é no **Windows 10 64 bits (versão 2004 / build 19041 ou mais nova)** ou Windows 11.
+O projeto é `net8.0-windows` + WinForms + driver IddCx — não compila nem roda em Linux/macOS.
+
+1. Instale o **SDK do .NET 8** (não basta o runtime):
+   ```powershell
+   winget install Microsoft.DotNet.SDK.8
+   ```
+   Confira com `dotnet --list-sdks` — precisa aparecer `8.0.x`.
+2. Abra `MonitorVirtual.sln` no Visual Studio 2022 (carga *Desenvolvimento para desktop com .NET*)
+   **como Administrador**, ou use o terminal:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File tools\build.ps1            # gera publish\
+   .\publish\MonitorVirtual.exe                                        # pede UAC na primeira execução
+   ```
+3. (Opcional) para gerar o instalador:
+   ```powershell
+   winget install JRSoftware.InnoSetup
+   powershell -ExecutionPolicy Bypass -File tools\build-installer.ps1  # gera dist\
+   ```
+
+O manifesto do app é `asInvoker`: se você abrir o `.exe` sem elevação, ele relança com `runas` e o Windows mostra o UAC. Para **depurar no Visual Studio**, abra o VS como Administrador — senão o F5 perde o depurador no relançamento.
 
 Estrutura:
 
@@ -176,7 +196,7 @@ mvcli watch           # watchdog em primeiro plano
 ### Instalação silenciosa (várias máquinas)
 
 ```powershell
-MonitorVirtualSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
+MonitorVirtualSetup-0.1.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
 ```
 
 ## Assinatura de código e privacidade

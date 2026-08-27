@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "MonitorVirtual": {
+      "commandName": "Project"
+    },
+    "MonitorVirtual (background)": {
+      "commandName": "Project",
+      "commandLineArgs": "--background"
+    }
+  }
+}
