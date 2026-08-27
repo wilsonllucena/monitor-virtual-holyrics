@@ -28,6 +28,12 @@ public static class Elevation
             });
             return true;
         }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // 1223: o usuário recusou o UAC. Qualquer outro erro de CreateProcess
+            // / ShellExecute também cai aqui — o chamador mostra a mensagem.
+            return false;
+        }
         catch
         {
             return false;

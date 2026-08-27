@@ -4,7 +4,7 @@
 
 #define MyAppName "Monitor Virtual para Holyrics"
 #define MyAppShortName "Monitor Virtual"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppPublisher "Wilson Lima"
 #define MyAppUrl "https://github.com/wilsonllucena/monitor-virtual-holyrics"
 #define MyAppExe "MonitorVirtual.exe"
@@ -66,8 +66,15 @@ Filename: "{app}\mvcli.exe"; Parameters: "install"; StatusMsg: "Instalando o dri
 Filename: "{app}\mvcli.exe"; Parameters: "on"; StatusMsg: "Ativando o monitor virtual..."; Flags: runhidden waituntilterminated
 ; 3) início automático elevado no logon
 Filename: "{app}\mvcli.exe"; Parameters: "startup-on"; Flags: runhidden waituntilterminated; Tasks: autostart
-; 4) abre o app ao final
-Filename: "{app}\{#MyAppExe}"; Description: "Abrir o {#MyAppShortName}"; Flags: postinstall nowait skipifsilent
+; 4) abre o app ao final.
+;    postinstall usa runasoriginaluser por padrão (CreateProcess no token
+;    limitado). Na 0.1.0 o exe pedia requireAdministrator e o Windows
+;    devolvia 740 (ERROR_ELEVATION_REQUIRED). O exe agora é asInvoker e
+;    pede UAC sozinho; runascurrentuser ainda assim reaproveita o token
+;    já elevado do instalador para não mostrar um segundo UAC.
+Filename: "{app}\{#MyAppExe}"; Description: "Abrir o {#MyAppShortName}"; Flags: postinstall nowait skipifsilent runascurrentuser
+; 4b) instalação silenciosa: sobe o tray em background (já estamos elevados)
+Filename: "{app}\{#MyAppExe}"; Parameters: "--background"; Flags: nowait skipifnotsilent runascurrentuser
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/f /im MonitorVirtual.exe"; Flags: runhidden waituntilterminated; RunOnceId: "closeapp"
