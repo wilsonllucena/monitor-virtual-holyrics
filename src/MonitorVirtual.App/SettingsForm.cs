@@ -43,6 +43,11 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _apiPort = new() { Minimum = 1, Maximum = 65535, Width = 80 };
     private readonly TextBox _apiToken = new() { Width = 200 };
     private readonly Label _apiResult = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
+    private readonly CheckBox _ndiBackground = new()
+    {
+        Text = "Incluir papel de fundo na saída NDI do Holyrics (Resolume)",
+        AutoSize = true,
+    };
 
     private readonly CheckBox _startWithWindows = new()
         { Text = "Iniciar com o Windows (elevado, sem UAC)", AutoSize = true };
@@ -65,7 +70,7 @@ internal sealed class SettingsForm : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(510, 706);
+        ClientSize = new Size(510, 754);
 
         BuildLayout();
         LoadFrom(config);
@@ -129,7 +134,7 @@ internal sealed class SettingsForm : Form
         }, 14, 150);
 
         // --- API do Holyrics ---
-        var apiBox = Group("Holyrics — API local (apenas status)", ref y, 84);
+        var apiBox = Group("Holyrics — API local", ref y, 132);
         Controls.Add(apiBox);
         Add(apiBox, new Label { Text = "Porta:", AutoSize = true }, 14, 28);
         Add(apiBox, _apiPort, 60, 24);
@@ -139,6 +144,14 @@ internal sealed class SettingsForm : Form
         testApi.Click += async (_, _) => await TestApiAsync();
         apiBox.Controls.Add(testApi);
         Add(apiBox, _apiResult, 124, 57);
+        Add(apiBox, _ndiBackground, 14, 80);
+        Add(apiBox, new Label
+        {
+            Text = "O NDI do Holyrics vem só com a letra (fundo transparente). Sem isto o Resolume mostra xadrez/preto.",
+            AutoSize = true,
+            MaximumSize = new Size(460, 0),
+            ForeColor = SystemColors.GrayText,
+        }, 14, 104);
 
         // --- sistema ---
         var sysBox = Group("Sistema", ref y, 140);
@@ -291,6 +304,7 @@ internal sealed class SettingsForm : Form
 
         _apiPort.Value = Math.Clamp(cfg.HolyricsApiPort, 1, 65535);
         _apiToken.Text = cfg.HolyricsApiToken ?? string.Empty;
+        _ndiBackground.Checked = cfg.HolyricsIncludeNdiBackground;
 
         _startWithWindows.Checked = cfg.StartWithWindows;
 
@@ -338,6 +352,7 @@ internal sealed class SettingsForm : Form
 
         cfg.HolyricsApiPort = (int)_apiPort.Value;
         cfg.HolyricsApiToken = string.IsNullOrWhiteSpace(_apiToken.Text) ? null : _apiToken.Text.Trim();
+        cfg.HolyricsIncludeNdiBackground = _ndiBackground.Checked;
 
         cfg.StartWithWindows = _startWithWindows.Checked;
     }
@@ -351,11 +366,29 @@ internal sealed class SettingsForm : Form
         };
 
         _apiResult.Text = "Consultando...";
-        var status = await new HolyricsClient().GetStatusAsync(probe);
-        _apiResult.Text = status.ApiReachable
-            ? "API respondendo."
-            : $"Processo: {(status.ProcessRunning ? "rodando" : "parado")} — {status.Detail}";
-        _apiResult.ForeColor = status.ApiReachable ? Color.SeaGreen : SystemColors.GrayText;
+        var client = new HolyricsClient();
+        var status = await client.GetStatusAsync(probe);
+        if (!status.ApiReachable)
+        {
+            _apiResult.Text = $"Processo: {(status.ProcessRunning ? "rodando" : "parado")} — {status.Detail}";
+            _apiResult.ForeColor = SystemColors.GrayText;
+            return;
+        }
+
+        if (_ndiBackground.Checked)
+        {
+            var ndi = await client.EnsureOpaqueNdiBackgroundAsync(probe);
+            _apiResult.Text = ndi.Ok
+                ? ndi.Changed > 0
+                    ? $"API ok. NDI: fundo ligado em {ndi.Changed} saída(s)."
+                    : "API ok. NDI já estava com fundo opaco."
+                : $"API ok. NDI: {ndi.Error}";
+            _apiResult.ForeColor = ndi.Ok ? Color.SeaGreen : Color.DarkGoldenrod;
+            return;
+        }
+
+        _apiResult.Text = "API respondendo.";
+        _apiResult.ForeColor = Color.SeaGreen;
     }
 
     private void InstallDriver()

@@ -101,6 +101,22 @@ personalizada.
 **A tela virtual não aparece na lista do Holyrics**
 Feche e abra o Holyrics. Ele só enxerga telas que já existiam quando abriu.
 
+**No Resolume a letra do Holyrics aparece e o fundo some (preview em xadrez)**
+Isso não é o monitor virtual: é a saída **NDI nativa do Holyrics** (v2.29+), que
+manda só a camada de texto com fundo transparente. O Resolume trata o resto como
+alpha (xadrez no preview, preto na composition).
+
+1. No Holyrics, ligue **Configurações → API Server** e copie o token.
+2. No Monitor Virtual: **Configurações → Holyrics — API local**, cole o token e
+   deixe marcada **Incluir papel de fundo na saída NDI do Holyrics**.
+3. Clique em **Testar API** (ou rode `mvcli holyrics --ndi-fundo`).
+4. No Resolume, recarregue o clip NDI (`DESKTOP-… (Holyrics - NDI 1)`).
+
+O NDI do Holyrics **não envia vídeo de fundo** (limitação do próprio Holyrics).
+Para fundo em vídeo, use a tela **Virtual Display Driver** como Tela pública e
+capture esse monitor no Resolume (Advanced Output / captura de tela), não o NDI
+de texto.
+
 **O Holyrics projeta na tela errada / o vídeo abre no monitor do operador**
 Confira em **Configurações → Projeção** qual monitor está escolhido; use
 **Testar tela...** para identificar o virtual sem chutar.
@@ -190,6 +206,7 @@ mvcli status          # driver, dispositivo, monitor, topologia
 mvcli displays        # todas as telas e suas geometrias
 mvcli on | off        # liga/desliga (precisa de Administrador)
 mvcli apps --detect   # encontra Holyrics, Resolume, OBS
+mvcli holyrics --ndi-fundo  # inclui o papel de fundo na saída NDI
 mvcli watch           # watchdog em primeiro plano
 ```
 
