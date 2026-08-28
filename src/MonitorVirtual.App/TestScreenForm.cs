@@ -27,6 +27,7 @@ internal sealed class TestScreenForm : Form
         Bounds = screen.Bounds;
         TopMost = true;
         ShowInTaskbar = false;
+        Icon = IconFactory.AppIcon;
         BackColor = juntaWhite ? Color.White : Color.Black;
         DoubleBuffered = true;
         Cursor = Cursors.Hand;

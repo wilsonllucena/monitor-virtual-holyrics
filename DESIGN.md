@@ -250,6 +250,15 @@ não entrega soft-edge de projetor.
 - Chave liga/desliga **Monitor Virtual** (efeito imediato, sem UAC).
 - Chave **Telão surround** (2 projetores = 1 tela, com overposição configurável).
 - **Ajustar blend do telão**: sliders ao vivo de overposição, gama e intensidade.
+  Abre pelo menu da bandeja, por duplo clique no ícone, pela janela do programa na
+  barra de tarefas (botão dedicado) ou pela janela de visualização.
+- Janela **Monitor Virtual** (`PainelForm`) com ícone na barra de tarefas: o
+  `ApplicationContext` da bandeja sozinho não deixa o app na taskbar; o painel é a
+  presença visível. Clique esquerdo no `NotifyIcon` abre este painel — não depende
+  do `ContextMenuStrip` persistir.
+- Overlays das fatias: `WS_EX_NOACTIVATE` + `WS_EX_TRANSPARENT`, `KeepOnTop` sem
+  `SWP_SHOWWINDOW`, e pausa de z-order enquanto o menu da bandeja está aberto.
+  Sem isso o Windows 10 fecha o menu sozinho (foco roubado / overflow da bandeja).
 - Resolução: `1920×1080` (padrão), `1280×720`, `3840×1080` (2× Full HD), `3840×2160`, personalizada.
 - Nome amigável exibido: `Projecao Holyrics`.
 - "Iniciar com o Windows" / "Iniciar o Holyrics junto".

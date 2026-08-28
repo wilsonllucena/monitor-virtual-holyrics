@@ -104,6 +104,7 @@ internal sealed class SettingsForm : Form
         _apps = config.ManagedApps.Select(a => a.Clone()).ToList();
 
         Text = "Monitor Virtual para Holyrics";
+        Icon = IconFactory.AppIcon;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;

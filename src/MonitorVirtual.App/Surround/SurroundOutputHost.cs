@@ -23,12 +23,18 @@ internal sealed class SurroundOutputHost : IDisposable
     private double _gamma = SoftEdgeCurve.DefaultGamma;
     private double _gain = SoftEdgeCurve.DefaultGain;
     private bool _paused;
+    private bool _holdZOrder;
     private bool _captureFailing;
     private bool _disposed;
 
     public bool IsRunning => _plan is not null && !_paused && _outputs.Count > 0;
     public string? Summary => _plan?.Summary;
     public SurroundPlan? Plan => _plan;
+    public IReadOnlyList<string> ProjectorDeviceNames =>
+        _plan?.Slices.Select(s => s.DeviceName).ToArray() ?? Array.Empty<string>();
+
+    /// <summary>Depois de reafirmar as fatias, o painel/blend sobe de novo sem ativar.</summary>
+    public Action? RaiseOperatorUi { get; set; }
 
     public SurroundOutputHost(Func<Rectangle?> getSourceBounds)
     {
@@ -103,6 +109,11 @@ internal sealed class SurroundOutputHost : IDisposable
         }
     }
 
+    /// <summary>
+    /// Pausa só o z-order (menu da bandeja / painel). A captura continua — o telão não pisca.
+    /// </summary>
+    public void HoldZOrder(bool hold) => _holdZOrder = hold;
+
     public void Pause()
     {
         _paused = true;
@@ -137,8 +148,9 @@ internal sealed class SurroundOutputHost : IDisposable
 
     private void KeepOverlaysOnTop()
     {
-        if (_paused) return;
+        if (_paused || _holdZOrder) return;
         foreach (var output in _outputs) output.Form.KeepOnTop();
+        RaiseOperatorUi?.Invoke();
     }
 
     private void CaptureAndPresent()

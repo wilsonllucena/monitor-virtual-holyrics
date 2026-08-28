@@ -2,9 +2,14 @@ using System.Drawing.Drawing2D;
 
 namespace MonitorVirtual.App;
 
-/// <summary>Desenha os ícones da bandeja em runtime (evita assets binários no repositório).</summary>
+/// <summary>Desenha os ícones da bandeja e das janelas em runtime (evita assets binários no repositório).</summary>
 internal static class IconFactory
 {
+    private static Icon? _app;
+
+    /// <summary>Ícone verde do programa (janela, barra de tarefas, Alt+Tab).</summary>
+    public static Icon AppIcon => _app ??= Create(true);
+
     public static Icon Create(bool active)
     {
         using var bmp = new Bitmap(32, 32);
@@ -20,7 +25,6 @@ internal static class IconFactory
             g.FillRectangle(fill, body);
             g.DrawRectangle(frame, body);
 
-            // pé do monitor
             using var standBrush = new SolidBrush(frame.Color);
             g.FillRectangle(standBrush, 13, 22, 6, 4);
             g.FillRectangle(standBrush, 9, 26, 14, 3);
@@ -32,6 +36,15 @@ internal static class IconFactory
             }
         }
 
-        return Icon.FromHandle(bmp.GetHicon());
+        var handle = bmp.GetHicon();
+        try
+        {
+            using var tmp = Icon.FromHandle(handle);
+            return (Icon)tmp.Clone();
+        }
+        finally
+        {
+            NativeMethods.DestroyIcon(handle);
+        }
     }
 }

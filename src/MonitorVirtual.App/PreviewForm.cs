@@ -11,6 +11,9 @@ namespace MonitorVirtual.App;
 internal sealed class PreviewForm : Form
 {
     private readonly Func<Rectangle?> _getSourceBounds;
+    private readonly Action? _showSettings;
+    private readonly Action? _showBlend;
+    private readonly Func<bool>? _blendEnabled;
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly PictureBox _canvas = new()
     {
@@ -21,18 +24,28 @@ internal sealed class PreviewForm : Form
 
     private readonly StatusStrip _status = new();
     private readonly ToolStripStatusLabel _statusLabel = new() { Spring = true };
+    private ToolStripButton? _blendButton;
 
     private Bitmap? _frame;
     private Rectangle _source;
     private int _fps;
     private bool _captureFailing;
 
-    public PreviewForm(Func<Rectangle?> getSourceBounds, int fps)
+    public PreviewForm(
+        Func<Rectangle?> getSourceBounds,
+        int fps,
+        Action? showSettings = null,
+        Action? showBlend = null,
+        Func<bool>? blendEnabled = null)
     {
         _getSourceBounds = getSourceBounds;
+        _showSettings = showSettings;
+        _showBlend = showBlend;
+        _blendEnabled = blendEnabled;
         _fps = Math.Clamp(fps, 1, 60);
 
         Text = "Monitor virtual — visualização";
+        Icon = IconFactory.AppIcon;
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(960, 580);
         MinimumSize = new Size(360, 260);
@@ -89,6 +102,36 @@ internal sealed class PreviewForm : Form
         view.DropDownItems.Add(rate);
         menu.Items.Add(view);
 
+        var programa = new ToolStripMenuItem("Programa");
+        var settings = new ToolStripMenuItem("Configurações...", null, (_, _) => _showSettings?.Invoke());
+        var blend = new ToolStripMenuItem("Ajustar blend do telão...", null, (_, _) => _showBlend?.Invoke())
+        {
+            Enabled = _blendEnabled?.Invoke() ?? false,
+        };
+        programa.DropDownOpening += (_, _) => blend.Enabled = _blendEnabled?.Invoke() ?? false;
+        programa.DropDownItems.Add(settings);
+        programa.DropDownItems.Add(blend);
+        menu.Items.Add(programa);
+
+        if (_showSettings is not null || _showBlend is not null)
+        {
+            var tools = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden };
+            var blendBtn = new ToolStripButton("Ajustar blend do telão")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.Text,
+                Font = new Font(SystemFonts.MenuFont ?? Font, FontStyle.Bold),
+                Enabled = _blendEnabled?.Invoke() ?? false,
+            };
+            blendBtn.Click += (_, _) => _showBlend?.Invoke();
+            var cfgBtn = new ToolStripButton("Configurações");
+            cfgBtn.Click += (_, _) => _showSettings?.Invoke();
+            tools.Items.Add(blendBtn);
+            tools.Items.Add(new ToolStripSeparator());
+            tools.Items.Add(cfgBtn);
+            _blendButton = blendBtn;
+            Controls.Add(tools);
+        }
+
         MainMenuStrip = menu;
         Controls.Add(menu);
     }
@@ -116,7 +159,7 @@ internal sealed class PreviewForm : Form
         if (_source.Width <= 0 || _source.Height <= 0) return;
 
         var chrome = Height - ClientSize.Height;
-        var reserved = (MainMenuStrip?.Height ?? 0) + _status.Height;
+        var reserved = (MainMenuStrip?.Height ?? 0) + _status.Height + 28;
         var width = Math.Min(_source.Width, Screen.FromControl(this).WorkingArea.Width - 80);
         var height = (int)(width * (_source.Height / (double)_source.Width));
 
@@ -155,6 +198,8 @@ internal sealed class PreviewForm : Form
             _canvas.Invalidate();
             _statusLabel.Text = $"{_source.Width}x{_source.Height} em ({_source.X},{_source.Y}) · {_fps} fps";
             _captureFailing = false;
+            if (_blendButton is not null)
+                _blendButton.Enabled = _blendEnabled?.Invoke() ?? false;
         }
         catch (Exception ex)
         {
