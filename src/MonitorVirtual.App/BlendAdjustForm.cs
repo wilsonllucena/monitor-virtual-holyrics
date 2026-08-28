@@ -46,11 +46,13 @@ internal sealed class BlendAdjustForm : Form
         _persist = persist;
 
         Text = "Ajustar blend do telão";
+        Icon = IconFactory.AppIcon;
         FormBorderStyle = FormBorderStyle.FixedDialog;
-        StartPosition = FormStartPosition.CenterScreen;
+        StartPosition = FormStartPosition.Manual;
         MaximizeBox = false;
         MinimizeBox = false;
         TopMost = true;
+        ShowInTaskbar = true;
         ClientSize = new Size(500, 340);
         AutoScaleMode = AutoScaleMode.Dpi;
 

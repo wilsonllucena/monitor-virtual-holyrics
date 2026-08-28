@@ -4,7 +4,7 @@
 
 #define MyAppName "Monitor Virtual para Holyrics"
 #define MyAppShortName "Monitor Virtual"
-#define MyAppVersion "0.2.1"
+#define MyAppVersion "0.2.2"
 #define MyAppPublisher "Wilson Lima"
 #define MyAppUrl "https://github.com/wilsonllucena/monitor-virtual-holyrics"
 #define MyAppExe "MonitorVirtual.exe"
@@ -37,6 +37,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 MinVersion=10.0.19041
+SetupIconFile=..\src\MonitorVirtual.App\app.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
 ; sem AppMutex de propósito: em instalação silenciosa ele cancela o setup em vez de
 ; fechar o app. Quem encerra a instância antiga é o PrepareToInstall (taskkill), que

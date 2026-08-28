@@ -40,8 +40,10 @@ resolução, posição e pode receber a projeção. A diferença é que não exi
 4. Siga o assistente. Deixe marcada a opção **Iniciar o Monitor Virtual junto com o
    Windows** — é ela que garante a tela pronta antes do Holyrics abrir.
 
-Ao final o instalador já deixa tudo pronto: driver instalado, monitor virtual criado e o
-ícone perto do relógio (bandeja do Windows).
+Ao final o instalador já deixa tudo pronto: driver instalado, monitor virtual criado, o
+ícone perto do relógio (bandeja) e a janela **Monitor Virtual** na barra de tarefas
+(dois projetores + junta azul). Clique nela — ou clique **esquerdo** no ícone da bandeja — para
+abrir Configurações e **Ajustar blend do telão** sem depender do menu de clique direito.
 
 **Nada de reiniciar o computador**: a tela nova aparece na hora.
 
@@ -75,10 +77,16 @@ seguida e já enxerga a tela.
 
 ## Usando no dia a dia
 
-Clique no ícone do Monitor Virtual perto do relógio:
+O programa tem **duas** portas de entrada, de propósito: o menu da bandeja e a janela
+na barra de tarefas. O ícone é o mesmo nos dois sítios: **dois projetores cinza e a
+junta azul no meio** (atalho da área de trabalho, exe, taskbar e janela). Clique
+**esquerdo** no ícone perto do relógio abre a janela. Clique **direito** abre o menu.
+**Duplo clique** no ícone, com o telão surround ligado, abre direto **Ajustar blend do telão**.
+Clique no ícone dentro da janela também abre o blend.
 
 | Opção | O que faz |
 |---|---|
+| **Janela do Monitor Virtual** (barra de tarefas) | Botão grande **Ajustar blend do telão** + Configurações |
 | **Ligar / desligar monitor virtual** | Cria ou remove a tela na hora, sem pedir senha |
 | **Ligar / desligar telão surround** | Dois projetores viram **uma tela só**, com blend na junta |
 | **Ajustar blend do telão...** | Sliders de overposição, gama e intensidade — valem **ao vivo no projetor** |
@@ -133,8 +141,16 @@ telão. Os sliders mexem nas fatias enviadas aos projetores, no próximo quadro.
 
 ### Ajustar a junta até ficar invisível (olhe o TELÃO)
 
-Menu → **Ajustar blend do telão...** (janela pequena, sempre visível). Mexa
-olhando a **parede**, não a janela de visualização:
+Abra **Ajustar blend do telão** por qualquer um destes caminhos (o painel fica na
+frente, na tela do operador):
+
+1. Janela **Monitor Virtual** na barra de tarefas → botão verde **Ajustar blend do telão**.
+2. Clique esquerdo no ícone da bandeja → o mesmo botão.
+3. Duplo clique no ícone da bandeja (com surround ligado).
+4. Clique direito → **Ajustar blend do telão...**
+5. Na janela de visualização: menu **Programa** ou a barra **Ajustar blend do telão**.
+
+Mexa olhando a **parede**, não a janela de visualização:
 
 | Controle | O que faz | Faixa preta no meio | Costura clara |
 |---|---|---|---|
@@ -144,7 +160,7 @@ olhando a **parede**, não a janela de visualização:
 
 Marque **Mostrar padrão de junta** (fundo branco): se o centro ficar mais
 escuro que as laterais, a curva ainda está baixa. Ajuste até a faixa sumir.
-**Salvar e aplicar** / fechar o painel grava em `config.json` — sem reinstalar.
+**Fechar e guardar** grava em `config.json` — sem reinstalar.
 
 A **gama maior clareia** a junta nos projetores (compensação `pow(cosseno, 1/gama)`).
 A v0.2.0 usava a potência ao contrário e escurecia o meio.
@@ -178,10 +194,18 @@ Deixe o Monitor Virtual abrir o Holyrics (depois do surround). Se o Holyrics
 já estava aberto, use **Reiniciar programa** no menu depois do telão ligar.
 
 **Faixa preta vertical no meio do telão (preview no PC parece ok)**
-Dois projetores somam luz; o preview de monitor não. Menu → **Ajustar blend do
-telão**: aumente a **gama** (2,2–2,8) ou a **intensidade**, olhando a parede.
+Dois projetores somam luz; o preview de monitor não. Abra **Ajustar blend do
+telão** (janela na barra de tarefas, ou duplo clique no ícone): aumente a **gama**
+(2,2–2,8) ou a **intensidade**, olhando a parede.
 Marque **Mostrar padrão de junta**. Os sliders valem no próximo quadro nas
 fatias físicas, sem reinstalar.
+
+**Clique direito no ícone da bandeja e o menu fecha sozinho**
+Isso acontecia na v0.2.1 com o telão surround: as fatias TOPMOST nos projetores
+(e o overflow «mostrar ícones ocultos» do Windows 10) tiravam o foco do menu.
+A v0.2.2 mantém o menu aberto. Se ainda falhar, **clique esquerdo** no ícone ou
+use a janela **Monitor Virtual** na barra de tarefas — o botão **Ajustar blend
+do telão** não depende do menu.
 
 **No Resolume a letra do Holyrics aparece e o fundo some (preview em xadrez)**
 Isso não é o monitor virtual: é a saída **NDI nativa do Holyrics** (v2.29+), que
@@ -301,7 +325,7 @@ mvcli watch           # watchdog em primeiro plano
 ### Instalação silenciosa (várias máquinas)
 
 ```powershell
-MonitorVirtualSetup-0.2.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
+MonitorVirtualSetup-0.2.2.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
 ```
 
 ## Assinatura de código e privacidade

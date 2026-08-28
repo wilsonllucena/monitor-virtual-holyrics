@@ -11,7 +11,9 @@ using MonitorVirtual.App.Surround;
 
 namespace MonitorVirtual.App;
 
-/// <summary>Ícone na bandeja + watchdog. É o processo residente do produto.</summary>
+/// <summary>
+/// Ícone na bandeja, janela na barra de tarefas e watchdog. Processo residente.
+/// </summary>
 internal sealed class TrayApp : ApplicationContext
 {
     private readonly NotifyIcon _tray;
@@ -37,6 +39,9 @@ internal sealed class TrayApp : ApplicationContext
     private bool _holyricsSteerHintShown;
     private BlendAdjustForm? _blendAdjust;
     private TestScreenForm? _juntaTest;
+    private PainelForm? _painel;
+    private ContextMenuStrip? _menu;
+    private DateTime _menuHoldUntil;
 
     private readonly HashSet<string> _launched = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _needsRestart = new(StringComparer.OrdinalIgnoreCase);
@@ -68,11 +73,16 @@ internal sealed class TrayApp : ApplicationContext
         };
 
         var menu = new ContextMenuStrip();
+        _menu = menu;
+        menu.Opening += OnTrayMenuOpening;
+        menu.Closing += OnTrayMenuClosing;
+        menu.Closed += (_, _) => _surround?.HoldZOrder(false);
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_toggleItem);
         menu.Items.Add(_surroundItem);
         menu.Items.Add(_blendItem);
+        menu.Items.Add(new ToolStripMenuItem("Abrir janela do Monitor Virtual", null, (_, _) => ShowPainel()));
         menu.Items.Add(new ToolStripMenuItem("Ver o monitor em uma janela", null, (_, _) => ShowPreview()));
         menu.Items.Add(new ToolStripMenuItem("Testar tela...", null, (_, _) => ShowTestScreen()));
         menu.Items.Add(_restartItem);
@@ -90,7 +100,9 @@ internal sealed class TrayApp : ApplicationContext
             Visible = true,
             ContextMenuStrip = menu,
         };
-        _tray.DoubleClick += (_, _) => ShowSettings();
+        _tray.MouseUp += OnTrayMouseUp;
+        _tray.MouseClick += OnTrayMouseClick;
+        _tray.DoubleClick += OnTrayDoubleClick;
 
         _watchdog.Interval = Math.Max(2, _config.WatchdogSeconds) * 1000;
         _watchdog.Tick += (_, _) => RunReconcile();
@@ -101,7 +113,82 @@ internal sealed class TrayApp : ApplicationContext
 
         RunReconcile(firstRun: true, silent: background);
 
+        EnsurePainel();
+        if (background) _painel!.MostrarMinimizado();
+        else ShowPainel();
+
         if (openPreview) _marshal.BeginInvoke(ShowPreview);
+    }
+
+    private void OnTrayMenuOpening(object? sender, EventArgs e)
+    {
+        _surround?.HoldZOrder(true);
+        _menuHoldUntil = DateTime.UtcNow.AddMilliseconds(1500);
+        ForegroundForMenu();
+    }
+
+    private void OnTrayMenuClosing(object? sender, ToolStripDropDownClosingEventArgs e)
+    {
+        // Overflow da bandeja e overlays TOPMOST disparam AppFocusChange/AppClicked
+        // no instante em que o menu abre. Depois da janela de graça, o usuário
+        // clica fora e o menu fecha (ItemClicked / Keyboard sempre fecham).
+        if (DateTime.UtcNow >= _menuHoldUntil) return;
+        if (e.CloseReason is ToolStripDropDownCloseReason.AppFocusChange
+            or ToolStripDropDownCloseReason.AppClicked)
+            e.Cancel = true;
+    }
+
+    private void OnTrayMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right) return;
+        ForegroundForMenu();
+
+        if (_menu is { Visible: true }) return;
+
+        // Ícone no overflow ("mostrar ícones ocultos"): o flyout fecha e leva o
+        // menu junto. Reabre depois que o overflow sumiu.
+        _marshal.BeginInvoke(new Action(() =>
+        {
+            Task.Delay(90).ContinueWith(_ =>
+                _marshal.BeginInvoke(ReabrirMenuDaBandeja));
+        }));
+    }
+
+    private void ReabrirMenuDaBandeja()
+    {
+        if (_menu is null || _menu.Visible) return;
+        _surround?.HoldZOrder(true);
+        _menuHoldUntil = DateTime.UtcNow.AddMilliseconds(1500);
+        ForegroundForMenu();
+        _menu.Show(Cursor.Position);
+        ForegroundForMenu();
+    }
+
+    private IntPtr MenuOwnerHandle =>
+        _painel is { IsHandleCreated: true } ? _painel.Handle
+        : _marshal.IsHandleCreated ? _marshal.Handle
+        : IntPtr.Zero;
+
+    private void ForegroundForMenu()
+    {
+        var hwnd = MenuOwnerHandle;
+        if (hwnd == IntPtr.Zero) return;
+        NativeMethods.SetForegroundWindow(hwnd);
+        NativeMethods.PostMessage(hwnd, NativeMethods.WmNull, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    private void OnTrayMouseClick(object? sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+            ShowPainel();
+    }
+
+    private void OnTrayDoubleClick(object? sender, EventArgs e)
+    {
+        if (_config.SurroundEnabled && _surround is { IsRunning: true })
+            ShowBlendAdjust();
+        else
+            ShowPainel();
     }
 
     private void OnSystemChanged(object? sender, EventArgs e)
@@ -167,6 +254,7 @@ internal sealed class TrayApp : ApplicationContext
         _toggleItem.Text = _config.Enabled ? "Desligar monitor virtual" : "Ligar monitor virtual";
 
         SyncSurround(status, firstRun, silent);
+        _painel?.Atualizar(_statusItem.Text, _blendItem.Enabled);
 
         if (firstRun && !silent && !status.DriverInstalled)
             Notify("Driver do monitor virtual não está instalado. Use \"Reparar / reinstalar driver\".",
@@ -228,7 +316,10 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        _surround ??= new SurroundOutputHost(GetVirtualBounds);
+        _surround ??= new SurroundOutputHost(GetVirtualBounds)
+        {
+            RaiseOperatorUi = RaiseOperatorWindows,
+        };
         _surround.Start(plan, _config.SurroundOutputFps, _config.SurroundBlendGamma, _config.SurroundBlendGain);
         _statusItem.Text = $"{status.Summary} · {plan.Summary}";
         _blendItem.Enabled = true;
@@ -236,9 +327,10 @@ internal sealed class TrayApp : ApplicationContext
         MaybeSteerHolyrics(silent);
 
         if (firstRun && !silent)
-            Notify($"Telão surround ativo: {plan.Summary}. No Holyrics, escolha a tela Virtual Display Driver. " +
-                   "Ajuste o blend pelo menu «Ajustar blend do telão», olhando a parede.",
+            Notify($"Telão surround ativo: {plan.Summary}. Abra a janela do Monitor Virtual " +
+                   "(clique no ícone da bandeja ou na barra de tarefas) e use «Ajustar blend do telão».",
                 ToolTipIcon.Info);
+            ShowPainel();
     }
 
     /// <summary>
@@ -463,6 +555,43 @@ internal sealed class TrayApp : ApplicationContext
         });
     }
 
+    private void EnsurePainel()
+    {
+        if (_painel is { IsDisposed: false }) return;
+
+        _painel = new PainelForm(ShowBlendAdjust, ShowSettings, ShowPreview, ShowTestScreen);
+        _painel.Atualizar(_statusItem.Text, _blendItem.Enabled);
+        UiPlacement.Place(_painel, _surround?.ProjectorDeviceNames);
+        _ = _painel.Handle;
+    }
+
+    private void ShowPainel()
+    {
+        EnsurePainel();
+        var hidden = !_painel!.Visible || _painel.WindowState == FormWindowState.Minimized;
+        if (hidden)
+            UiPlacement.Place(_painel, _surround?.ProjectorDeviceNames);
+        _painel.Atualizar(_statusItem.Text, _blendItem.Enabled);
+        _painel.MostrarNaFrente();
+        UiPlacement.RaiseAboveOverlays(_painel);
+    }
+
+    private void RaiseOperatorWindows()
+    {
+        UiPlacement.RaiseAboveOverlays(_blendAdjust);
+        if (_painel is { Visible: true, WindowState: not FormWindowState.Minimized }
+            && FormEstaNoProjetor(_painel))
+            UiPlacement.RaiseAboveOverlays(_painel);
+    }
+
+    private bool FormEstaNoProjetor(Form form)
+    {
+        var names = _surround?.ProjectorDeviceNames;
+        if (names is null || names.Count == 0) return false;
+        var screen = Screen.FromControl(form);
+        return names.Contains(screen.DeviceName, StringComparer.OrdinalIgnoreCase);
+    }
+
     private void ShowPreview()
     {
         if (_preview is { IsDisposed: false })
@@ -472,8 +601,11 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        _preview = new PreviewForm(GetVirtualBounds, _config.PreviewFps);
+        _preview = new PreviewForm(GetVirtualBounds, _config.PreviewFps,
+            ShowSettings, ShowBlendAdjust, () => _blendItem.Enabled);
         _preview.FormClosed += (_, _) => _preview = null;
+        _preview.Icon = IconFactory.AppIcon;
+        UiPlacement.Place(_preview, _surround?.ProjectorDeviceNames, cornerIfCovered: false);
         _preview.Show();
     }
 
@@ -538,6 +670,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         var snapshot = _config.Clone();
         using var form = new SettingsForm(_config.Clone(), _provisioner, ApplyBlendLive);
+        form.Icon = IconFactory.AppIcon;
+        UiPlacement.Place(form, _surround?.ProjectorDeviceNames, cornerIfCovered: false);
         if (form.ShowDialog() != DialogResult.OK)
         {
             ApplyBlendLive(snapshot.SurroundBlendOverlap, snapshot.SurroundBlendGamma, snapshot.SurroundBlendGain);
@@ -570,7 +704,9 @@ internal sealed class TrayApp : ApplicationContext
         if (_blendAdjust is { IsDisposed: false })
         {
             _blendAdjust.WindowState = FormWindowState.Normal;
+            UiPlacement.Place(_blendAdjust, _surround?.ProjectorDeviceNames);
             _blendAdjust.Activate();
+            UiPlacement.RaiseAboveOverlays(_blendAdjust);
             return;
         }
 
@@ -593,7 +729,11 @@ internal sealed class TrayApp : ApplicationContext
                 RunReconcile();
             });
         _blendAdjust.FormClosed += (_, _) => _blendAdjust = null;
+        _blendAdjust.Icon = IconFactory.AppIcon;
+        UiPlacement.Place(_blendAdjust, _surround?.ProjectorDeviceNames);
         _blendAdjust.Show();
+        _blendAdjust.Activate();
+        UiPlacement.RaiseAboveOverlays(_blendAdjust);
     }
 
     /// <summary>Gama/ganho/largura do fade no próximo quadro, nas fatias dos projetores.</summary>
@@ -728,6 +868,9 @@ internal sealed class TrayApp : ApplicationContext
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _blendAdjust?.Close();
         _juntaTest?.Close();
+        _painel?.PermitirFechar();
+        _painel?.Close();
+        _painel = null;
         _surround?.Dispose();
         _surround = null;
         _tray.Visible = false;

@@ -35,7 +35,7 @@ internal static class Program
         if (!isFirst)
         {
             MessageBox.Show(
-                "O Monitor Virtual já está em execução (veja o ícone perto do relógio).",
+                "O Monitor Virtual já está em execução — veja o ícone perto do relógio ou a janela na barra de tarefas.",
                 "Monitor Virtual", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
