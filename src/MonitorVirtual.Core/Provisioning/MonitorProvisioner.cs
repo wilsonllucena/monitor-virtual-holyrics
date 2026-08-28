@@ -321,10 +321,10 @@ public sealed class MonitorProvisioner
                     spanMon, cfg.SurroundBlendOverlap, cfg.SurroundSwap,
                     NvidiaSpan.NativeHalves().Left, NvidiaSpan.NativeHalves().Right,
                     cfg.SurroundAlignLeftX, cfg.SurroundAlignRightX);
-            var canvasW = planNow?.CanvasWidth ?? already.Width;
-            var canvasH = planNow?.CanvasHeight ?? already.Height;
-            Log.Info($"Surround NVIDIA já ativo: {already.Summary}. Canvas Holyrics {canvasW}x{canvasH}.");
-            return (canvasW, canvasH, already);
+            var activeCanvasW = planNow?.CanvasWidth ?? already.Width;
+            var activeCanvasH = planNow?.CanvasHeight ?? already.Height;
+            Log.Info($"Surround NVIDIA já ativo: {already.Summary}. Canvas Holyrics {activeCanvasW}x{activeCanvasH}.");
+            return (activeCanvasW, activeCanvasH, already);
         }
 
         var physical = _display.ListPhysical();
