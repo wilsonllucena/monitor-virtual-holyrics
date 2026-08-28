@@ -67,11 +67,18 @@ internal sealed class SettingsForm : Form
         CheckOnClick = true,
     };
     private readonly NumericUpDown _blendOverlap = new()
-        { Minimum = 0, Maximum = 640, Increment = 16, Width = 70 };
+        { Minimum = 0, Maximum = 640, Increment = 16, Width = 70, Value = 192 };
     private readonly NumericUpDown _blendGamma = new()
-        { Minimum = 1, Maximum = 3, DecimalPlaces = 1, Increment = 0.1M, Width = 70 };
+        { Minimum = 0.4M, Maximum = 3, DecimalPlaces = 2, Increment = 0.1M, Width = 70, Value = 2.2M };
+    private readonly NumericUpDown _blendGain = new()
+        { Minimum = 0.25M, Maximum = 2.5M, DecimalPlaces = 2, Increment = 0.05M, Width = 70, Value = 1M };
     private readonly CheckBox _surroundSwap = new()
         { Text = "Inverter esquerda/direita", AutoSize = true };
+    private readonly CheckBox _steerHolyrics = new()
+    {
+        Text = "Holyrics: Tela pública = monitor virtual (oculta telas nos projetores)",
+        AutoSize = true,
+    };
     private readonly Label _surroundHint = new()
     {
         AutoSize = true,
@@ -81,13 +88,19 @@ internal sealed class SettingsForm : Form
 
     private int _customWidth = 1920;
     private int _customHeight = 1080;
+    private readonly Action<int, double, double>? _liveBlend;
+    private bool _loading;
 
     public AppConfig Result { get; }
 
-    public SettingsForm(AppConfig config, MonitorProvisioner provisioner)
+    public SettingsForm(
+        AppConfig config,
+        MonitorProvisioner provisioner,
+        Action<int, double, double>? liveBlend = null)
     {
         Result = config;
         _provisioner = provisioner;
+        _liveBlend = liveBlend;
         _apps = config.ManagedApps.Select(a => a.Clone()).ToList();
 
         Text = "Monitor Virtual para Holyrics";
@@ -97,10 +110,12 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScroll = true;
-        ClientSize = new Size(530, 680);
+        ClientSize = new Size(530, 760);
 
         BuildLayout();
+        _loading = true;
         LoadFrom(config);
+        _loading = false;
         RefreshAppList();
         RefreshStatus();
     }
@@ -126,7 +141,7 @@ internal sealed class SettingsForm : Form
         Add(monitorBox, _watchdog, 140, my);
 
         // --- telão surround ---
-        var surroundBox = Group("Telão surround / blending", ref y, 228);
+        var surroundBox = Group("Telão surround / blending", ref y, 292);
         Controls.Add(surroundBox);
         var sy0 = 22;
         Add(surroundBox, _surround, 14, sy0); sy0 += 24;
@@ -137,12 +152,17 @@ internal sealed class SettingsForm : Form
         sy0 += 78;
         Add(surroundBox, new Label { Text = "Overposição (px):", AutoSize = true }, 14, sy0 + 4);
         Add(surroundBox, _blendOverlap, 128, sy0);
-        Add(surroundBox, new Label { Text = "Gama:", AutoSize = true }, 214, sy0 + 4);
-        Add(surroundBox, _blendGamma, 258, sy0);
-        Add(surroundBox, _surroundSwap, 340, sy0 + 4); sy0 += 30;
+        Add(surroundBox, new Label { Text = "Gama:", AutoSize = true }, 210, sy0 + 4);
+        Add(surroundBox, _blendGamma, 250, sy0);
+        Add(surroundBox, new Label { Text = "Intensidade:", AutoSize = true }, 332, sy0 + 4);
+        Add(surroundBox, _blendGain, 410, sy0); sy0 += 30;
+        Add(surroundBox, _surroundSwap, 14, sy0); sy0 += 22;
+        Add(surroundBox, _steerHolyrics, 14, sy0); sy0 += 24;
         Add(surroundBox, _surroundHint, 14, sy0);
         _surround.CheckedChanged += (_, _) => UpdateSurroundHint();
-        _blendOverlap.ValueChanged += (_, _) => UpdateSurroundHint();
+        _blendOverlap.ValueChanged += (_, _) => { UpdateSurroundHint(); NotifyLiveBlend(); };
+        _blendGamma.ValueChanged += (_, _) => NotifyLiveBlend();
+        _blendGain.ValueChanged += (_, _) => NotifyLiveBlend();
         _surroundMonitors.ItemCheck += (_, _) => BeginInvoke(new Action(UpdateSurroundHint));
 
         // --- programas que usam o monitor ---
@@ -360,8 +380,10 @@ internal sealed class SettingsForm : Form
 
         _surround.Checked = cfg.SurroundEnabled;
         _blendOverlap.Value = Math.Clamp(cfg.SurroundBlendOverlap, 0, 640);
-        _blendGamma.Value = (decimal)Math.Clamp(cfg.SurroundBlendGamma, 1, 3);
+        _blendGamma.Value = (decimal)Math.Clamp(cfg.SurroundBlendGamma, 0.4, 3);
+        _blendGain.Value = (decimal)Math.Clamp(cfg.SurroundBlendGain, 0.25, 2.5);
         _surroundSwap.Checked = cfg.SurroundSwap;
+        _steerHolyrics.Checked = cfg.SurroundSteerHolyrics;
         RefreshSurroundMonitors(selectDetected: false, selectedNames: cfg.SurroundDeviceNames);
         UpdateSurroundHint();
     }
@@ -411,7 +433,9 @@ internal sealed class SettingsForm : Form
         cfg.SurroundEnabled = _surround.Checked;
         cfg.SurroundBlendOverlap = (int)_blendOverlap.Value;
         cfg.SurroundBlendGamma = (double)_blendGamma.Value;
+        cfg.SurroundBlendGain = (double)_blendGain.Value;
         cfg.SurroundSwap = _surroundSwap.Checked;
+        cfg.SurroundSteerHolyrics = _steerHolyrics.Checked;
         cfg.SurroundDeviceNames = _surroundMonitors.CheckedItems
             .Cast<SurroundMonitorItem>()
             .Select(i => i.DeviceName)
@@ -474,7 +498,14 @@ internal sealed class SettingsForm : Form
         _surroundHint.Text = plan is null
             ? "Marque pelo menos 2 projetores. Com 1 tela o surround não liga."
             : $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight} — o Holyrics vê uma tela só. " +
-              $"Ajuste a overposição até a costura do meio desaparecer.";
+              "Olhe o TELÃO: faixa preta no meio → aumente gama ou intensidade. " +
+              "Os números valem ao vivo nas fatias dos projetores, não só no preview.";
+    }
+
+    private void NotifyLiveBlend()
+    {
+        if (_loading || !_surround.Checked) return;
+        _liveBlend?.Invoke((int)_blendOverlap.Value, (double)_blendGamma.Value, (double)_blendGain.Value);
     }
 
     private sealed record SurroundMonitorItem(MonitorVirtual.Core.Surround.SurroundMonitor Monitor)

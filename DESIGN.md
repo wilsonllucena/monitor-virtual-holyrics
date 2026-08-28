@@ -162,11 +162,11 @@ e o monitor virtual **nunca** primário.
 
 **Verificação opcional via API do Holyrics** (Configurações → API Server; `POST` JSON em
 `http://localhost:8091/api/<metodo>?token=...`): `GetDisplaySettings` / `SetDisplaySettings`
-permitem ler e ligar/desligar as telas de apresentação. Serve para o nosso app mostrar
-"Holyrics conectado, tela pública ativa ✔". **Limitação:** a API não expõe *qual monitor
-físico* é a tela pública — esse vínculo é feito uma vez no assistente do Holyrics. O
-instalador deve, portanto, terminar com um passo guiado ("abra Configurações → Projeção e
-escolha a tela *Monitor Virtual*"), com screenshot.
+leem e alteram as telas. A Tela pública expõe `screen` (`"x,y"`) e `area`/`total_area`.
+Com surround ligado o app aponta `id=public` para o canvas virtual e manda `hide: true`
+nas `screen_2`/`screen_3` cuja área cai num projetor — senão o Holyrics abre em duas
+saídas físicas e o telão fica dividido. Sem token da API, o operador ainda precisa
+escolher o Virtual Display Driver uma vez no assistente.
 
 Uma alternativa que vale medir na fase 2: o Holyrics também tem saída **NDI**. Para quem só
 quer levar a projeção ao OBS, NDI resolve sem driver nenhum. O monitor virtual continua
@@ -228,9 +228,15 @@ Caminho escolhido (independente da GPU):
    posicioná-los lado a lado;
 2. dimensionar o monitor virtual para o canvas único
    `largura = Σ larguras − overlap × (n−1)` (dois Full HD + 192 px → 3648×1080);
-3. o Holyrics projeta nessa tela só;
+3. o Holyrics projeta nessa tela só (API: Tela pública = origem do virtual;
+   `screen_2` nos projetores é ocultada);
 4. o app captura o canvas (`CopyFromScreen`) e pinta uma janela sem borda em cada
-   projetor, com fade em cosseno + gama 2.2 na zona compartilhada.
+   projetor, com fade em cosseno **compensado** (`pow(s, 1/gama)`, padrão 2.2) na
+   zona compartilhada. Sem a inversão, dois projetores somam ~0,44 no meio e a
+   junta fica preta — o preview no monitor (uma tela só, emissiva) não mostra isso.
+   Gama, ganho e largura do fade aplicam-se no próximo quadro nas fatias físicas
+   (menu **Ajustar blend do telão**); o overlay reafirma TOPMOST para o Holyrics
+   não cobrir os projetores com janelas próprias.
 
 A zona de overlap contém **os mesmos pixels** nas duas fatias — é o que diferencia
 blend de um corte seco ou de um clone. `SurroundEnabled` é opt-in: 1 monitor não
@@ -243,6 +249,7 @@ não entrega soft-edge de projetor.
 
 - Chave liga/desliga **Monitor Virtual** (efeito imediato, sem UAC).
 - Chave **Telão surround** (2 projetores = 1 tela, com overposição configurável).
+- **Ajustar blend do telão**: sliders ao vivo de overposição, gama e intensidade.
 - Resolução: `1920×1080` (padrão), `1280×720`, `3840×1080` (2× Full HD), `3840×2160`, personalizada.
 - Nome amigável exibido: `Projecao Holyrics`.
 - "Iniciar com o Windows" / "Iniciar o Holyrics junto".

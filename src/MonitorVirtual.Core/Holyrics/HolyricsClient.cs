@@ -25,7 +25,7 @@ public sealed record HolyricsNdiFixResult(
 /// com <c>transparent_background=true</c>, e o Resolume mostra xadrez/preto no lugar
 /// do papel de fundo.
 /// </summary>
-public sealed class HolyricsClient
+public sealed partial class HolyricsClient
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
 
