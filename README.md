@@ -112,29 +112,33 @@ Se os dois projetores mostram o **mesmo slide** lado a lado, o Windows (ou o
 Holyrics) está em **clone/espelho**. Não é surround: a imagem não estica, e a
 junta no meio fica uma costura clara.
 
-O Monitor Virtual resolve isso sem NVIDIA Surround e sem o Resolume:
+O Monitor Virtual faz o telão virar **um monitor só**, no mesmo espírito do
+NVIDIA Surround: a barra de tarefas atravessa a parede de ponta a ponta.
 
-1. Detecta os monitores físicos.
+1. Detecta os projetores físicos.
 2. Sai do clone e força **Estender**.
-3. Cria um canvas único no monitor virtual (dois Full HD com blend de 192 px →
-   **3648×1080**; sem overposição → **3840×1080**).
-4. O Holyrics projeta **uma tela só** nesse canvas (Tela pública = Virtual
-   Display Driver). Telas extras que caíam nos projetores são ocultadas.
-5. O app recorta a metade esquerda/direita para cada projetor e aplica
-   **soft-edge blend** na junta — os pixels da overposição são os mesmos nos
-   dois lados, só o brilho cruza.
+3. **Com GPU NVIDIA:** liga Surround/Mosaic nos dois HDMI. O Windows passa a
+   ver um monitor lógico (dois Full HD com blend de 192 px → **3648×1080**;
+   sem overposição → **3840×1080**). A taskbar é uma faixa só. O Holyrics
+   projeta nesse telão. O monitor virtual IddCx sai do desktop (não vira
+   tela extra).
+4. **Se o driver recusar o Mosaic:** o canvas virtual vira o **primário**
+   naquele tamanho, o app recorta esquerda/direita com **soft-edge blend**.
+   A taskbar mora no canvas, então também atravessa o telão na parede.
 
 O preview no monitor do PC **não** é a verdade da parede. Dois projetores
 somam luz: uma curva que parece boa no preview deixa uma **faixa preta** no
-telão. Os sliders mexem nas fatias enviadas aos projetores, no próximo quadro.
+telão. Os sliders mexem nas fatias (ou no scanout NVIDIA), no próximo quadro.
 
 ### Como ligar
 
 1. Menu do ícone → **Ligar telão surround (2 projetores = 1 tela)**.
 2. Ou **Configurações → Telão surround / blending**: marque os dois projetores.
 3. **Feche e abra o Holyrics** (ou deixe o app abri-lo **depois** do surround).
-   Em **Projeção**, a Tela pública deve ser o **Virtual Display Driver** — o
-   app tenta apontar isso sozinho se o token da API estiver em Configurações.
+   Em **Projeção**, a Tela pública deve ser o **telão único** (no Surround
+   NVIDIA ele aparece como um monitor largo; no fallback, o Virtual Display
+   Driver). O app tenta apontar isso sozinho se o token da API estiver em
+   Configurações.
 4. **Testar tela...**: no projetor esquerdo deve aparecer sobretudo **ESQUERDA**,
    no direito **DIREITA**. Se os dois mostram as duas palavras, ainda está em
    clone.
@@ -178,6 +182,13 @@ Resolume não faz o blend certo.
 
 **A tela virtual não aparece na lista do Holyrics**
 Feche e abra o Holyrics. Ele só enxerga telas que já existiam quando abriu.
+
+**A barra de tarefas só aparece na metade esquerda do telão**
+O Windows ainda está tratando os projetores como dois monitores. Ligue
+**Telão surround**. Com GPU NVIDIA o app junta as saídas num monitor só
+(taskbar de ponta a ponta). Se o driver recusar, o canvas virtual vira o
+primário e a barra atravessa a parede nas fatias. Com 1 monitor o surround
+não altera nada.
 
 **No telão aparecem 2 telas / o mesmo slide duas vezes**
 Isso é clone, não surround. Ligue **Telão surround** no menu, confirme que o
@@ -261,9 +272,9 @@ falta para o uso em igreja:
 - liga e desliga a tela habilitando o dispositivo — sem pedir UAC no dia a dia, graças a
   uma tarefa de logon elevada;
 - força a topologia **Estender**, a causa nº 1 de "o Holyrics não projeta";
-- **telão surround**: dois projetores viram um canvas único com soft-edge blend na junta
-  (opt-in; 1 monitor não muda nada); gama/ganho ajustáveis ao vivo nas fatias físicas;
-  Holyrics é apontado para a Tela pública no monitor virtual;
+- **telão surround**: dois projetores viram um monitor lógico (NVIDIA Surround
+  quando o GPU deixa — taskbar contínua de ponta a ponta; senão canvas virtual
+  primário + blend nas saídas). Opt-in; 1 monitor não muda nada;
 - mantém **resolução e posição fixas**, para o Holyrics não perder a configuração da tela;
 - nunca deixa a tela virtual virar o monitor principal;
 - vigia e reprovisiona depois de suspensão, atualização de GPU ou mudança em `Win+P`;
@@ -325,7 +336,7 @@ mvcli watch           # watchdog em primeiro plano
 ### Instalação silenciosa (várias máquinas)
 
 ```powershell
-MonitorVirtualSetup-0.2.2.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
+MonitorVirtualSetup-0.3.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
 ```
 
 ## Assinatura de código e privacidade

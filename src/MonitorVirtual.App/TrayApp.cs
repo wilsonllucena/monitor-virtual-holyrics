@@ -185,7 +185,9 @@ internal sealed class TrayApp : ApplicationContext
 
     private void OnTrayDoubleClick(object? sender, EventArgs e)
     {
-        if (_config.SurroundEnabled && _surround is { IsRunning: true })
+        if (_config.SurroundEnabled &&
+            (_surround is { IsRunning: true } ||
+             _last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical }))
             ShowBlendAdjust();
         else
             ShowPainel();
@@ -248,7 +250,8 @@ internal sealed class TrayApp : ApplicationContext
     private void ApplyStatus(ProvisionStatus status, bool firstRun, bool silent, bool wasActive = true)
     {
         _last = status;
-        _tray.Icon = IconFactory.Create(status.MonitorActive);
+        _tray.Icon = IconFactory.Create(
+            status.MonitorActive || status.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical });
         _tray.Text = Truncate($"Monitor Virtual — {status.Summary}", 63);
         _statusItem.Text = status.Summary;
         _toggleItem.Text = _config.Enabled ? "Desligar monitor virtual" : "Ligar monitor virtual";
@@ -278,6 +281,7 @@ internal sealed class TrayApp : ApplicationContext
     /// Depois do monitor virtual pronto, cobre os projetores com as fatias do canvas
     /// (antes de abrir o Holyrics). Clone/espelho fica para trás: cada lado mostra
     /// metade do slide, com blend na junta.
+    /// Com NVIDIA Surround o Windows já vê um monitor só — sem overlay.
     /// </summary>
     private void SyncSurround(ProvisionStatus status, bool firstRun, bool silent)
     {
@@ -288,19 +292,49 @@ internal sealed class TrayApp : ApplicationContext
         _blendItem.Enabled = _config.SurroundEnabled;
 
         var physical = _provisioner.Display.ListPhysical();
+        var nvidia = status.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical };
 
-        if (!_config.SurroundEnabled || !status.MonitorActive)
+        if (!_config.SurroundEnabled)
         {
             _surround?.Stop();
             _holyricsSteerApplied = false;
 
-            if (firstRun && !silent && !_config.SurroundEnabled && physical.Count >= 2 && !_surroundHintShown)
+            if (firstRun && !silent && physical.Count >= 2 && !_surroundHintShown)
             {
                 _surroundHintShown = true;
                 Notify("Dois monitores detectados. Se o telão está repetindo o mesmo slide, " +
                        "ligue Telão surround no menu.", ToolTipIcon.Info);
             }
 
+            return;
+        }
+
+        if (nvidia)
+        {
+            _surround?.Stop();
+            _blendItem.Enabled = true;
+            _statusItem.Text = status.Summary;
+            MaybeSteerHolyrics(silent);
+
+            if (firstRun && !silent)
+            {
+                Notify($"{status.Summary}. A barra de tarefas atravessa o telão como um monitor só. " +
+                       "Abra a janela do Monitor Virtual (clique no ícone da bandeja) e use «Ajustar blend do telão».",
+                    ToolTipIcon.Info);
+                ShowPainel();
+            }
+            return;
+        }
+
+        if (!status.MonitorActive && status.Surround is null)
+        {
+            _surround?.Stop();
+            _holyricsSteerApplied = false;
+
+            var planProbe = SurroundPlanner.TryCreate(physical, _config);
+            if (firstRun && !silent && planProbe is null)
+                Notify("Surround ligado, mas precisa de 2 projetores físicos. Nada foi alterado.",
+                    ToolTipIcon.Warning);
             return;
         }
 
@@ -316,21 +350,25 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        _surround ??= new SurroundOutputHost(GetVirtualBounds)
+        _surround ??= new SurroundOutputHost(GetCanvasBounds)
         {
             RaiseOperatorUi = RaiseOperatorWindows,
         };
         _surround.Start(plan, _config.SurroundOutputFps, _config.SurroundBlendGamma, _config.SurroundBlendGain);
-        _statusItem.Text = $"{status.Summary} · {plan.Summary}";
+        _statusItem.Text = status.Surround?.Summary ?? $"{status.Summary} · {plan.Summary}";
         _blendItem.Enabled = true;
 
         MaybeSteerHolyrics(silent);
 
         if (firstRun && !silent)
-            Notify($"Telão surround ativo: {plan.Summary}. Abra a janela do Monitor Virtual " +
-                   "(clique no ícone da bandeja ou na barra de tarefas) e use «Ajustar blend do telão».",
+        {
+            Notify(
+                (status.Surround?.Summary ?? plan.Summary) +
+                ". Canvas virtual é o primário: a taskbar atravessa o telão. " +
+                "Abra a janela do Monitor Virtual (clique no ícone da bandeja) e use «Ajustar blend do telão».",
                 ToolTipIcon.Info);
             ShowPainel();
+        }
     }
 
     /// <summary>
@@ -342,7 +380,9 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (!_config.SurroundEnabled || !_config.SurroundSteerHolyrics) return;
         if (_holyricsSteerApplied || _holyricsSteerInFlight) return;
-        if (_surround is not { IsRunning: true }) return;
+        if (_surround is not { IsRunning: true } &&
+            _last?.Surround is not { Kind: SurroundSurfaceKind.NvidiaLogical })
+            return;
 
         if (string.IsNullOrWhiteSpace(_config.HolyricsApiToken))
         {
@@ -358,13 +398,16 @@ internal sealed class TrayApp : ApplicationContext
 
         if (!HolyricsClient.IsRunning()) return;
 
-        var virt = GetVirtualBounds();
-        if (virt is null) return;
+        var canvas = GetCanvasBounds();
+        if (canvas is null) return;
 
-        var projectors = SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config).ToList();
+        var projectors = _last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical }
+            ? Array.Empty<SurroundMonitor>()
+            : SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config).ToList();
         _holyricsSteerInFlight = true;
         var cfg = _config.Clone();
-        var rect = virt.Value;
+        var rect = canvas.Value;
+        var nvidiaSpan = _last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical };
 
         Task.Run(async () =>
         {
@@ -396,10 +439,12 @@ internal sealed class TrayApp : ApplicationContext
                 _holyricsSteerFailures = 0;
                 if (result.Changed && !silent)
                     Notify(
-                        "Holyrics: Tela pública no monitor virtual (canvas único). " +
-                        (result.HiddenScreens > 0
-                            ? $"{result.HiddenScreens} tela(s) extra(s) nos projetores foram ocultadas."
-                            : "As duas saídas físicas não recebem mais o slide direto."),
+                        nvidiaSpan
+                            ? "Holyrics: Tela pública no telão único (um monitor, taskbar contínua)."
+                            : "Holyrics: Tela pública no monitor virtual (canvas único). " +
+                              (result.HiddenScreens > 0
+                                  ? $"{result.HiddenScreens} tela(s) extra(s) nos projetores foram ocultadas."
+                                  : "As duas saídas físicas não recebem mais o slide direto."),
                         ToolTipIcon.Info);
             });
         });
@@ -601,7 +646,7 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        _preview = new PreviewForm(GetVirtualBounds, _config.PreviewFps,
+        _preview = new PreviewForm(GetCanvasBounds, _config.PreviewFps,
             ShowSettings, ShowBlendAdjust, () => _blendItem.Enabled);
         _preview.FormClosed += (_, _) => _preview = null;
         _preview.Icon = IconFactory.AppIcon;
@@ -609,9 +654,27 @@ internal sealed class TrayApp : ApplicationContext
         _preview.Show();
     }
 
-    private Rectangle? GetVirtualBounds()
+    private Rectangle? GetCanvasBounds()
     {
-        var name = (_last ?? _provisioner.GetStatus()).AdapterDeviceName;
+        var status = _last ?? _provisioner.GetStatus();
+        if (status.Surround is { } surface)
+        {
+            if (!string.IsNullOrWhiteSpace(surface.AdapterDeviceName))
+            {
+                var named = Screen.AllScreens.FirstOrDefault(s =>
+                    string.Equals(s.DeviceName, surface.AdapterDeviceName, StringComparison.OrdinalIgnoreCase));
+                if (named is not null) return named.Bounds;
+            }
+
+            var bySize = Screen.AllScreens
+                .OrderByDescending(s => s.Bounds.Width)
+                .FirstOrDefault(s => s.Bounds.Width >= surface.Width - 64);
+            if (bySize is not null) return bySize.Bounds;
+
+            return new Rectangle(surface.X, surface.Y, surface.Width, surface.Height);
+        }
+
+        var name = status.AdapterDeviceName;
         if (name is null) return null;
 
         var screen = Screen.AllScreens.FirstOrDefault(s =>
@@ -623,13 +686,17 @@ internal sealed class TrayApp : ApplicationContext
     /// <summary>Start ordenado: só abre os programas depois que o monitor (e o surround) estão ativos.</summary>
     private void MaybeLaunchApps(ProvisionStatus status)
     {
-        if (!status.MonitorActive) return;
+        if (!status.MonitorActive && status.Surround is not { Kind: SurroundSurfaceKind.NvidiaLogical })
+            return;
 
         if (_config.SurroundEnabled)
         {
             var physical = _provisioner.Display.ListPhysical();
             var plan = SurroundPlanner.TryCreate(physical, _config);
-            if (plan is not null && _surround is not { IsRunning: true })
+            var surface = status.Surround;
+            if (plan is not null &&
+                surface is null &&
+                _surround is not { IsRunning: true })
             {
                 Log.Info("Aguardando o telão surround ficar estável antes de abrir os programas.");
                 return;
@@ -710,7 +777,8 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        if (_surround is not { IsRunning: true })
+        if (_surround is not { IsRunning: true } &&
+            _last?.Surround is not { Kind: SurroundSurfaceKind.NvidiaLogical })
         {
             MessageBox.Show(
                 "Ligue o telão surround com 2 projetores para ajustar o blend na parede.",
@@ -743,6 +811,13 @@ internal sealed class TrayApp : ApplicationContext
         _config.SurroundBlendGamma = gamma;
         _config.SurroundBlendGain = gain;
         _surround?.ApplyBlend(gamma, gain, overlap);
+
+        if (_last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical })
+        {
+            var physical = SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config);
+            var mapped = NvidiaSpan.MapDisplays(physical.Count >= 2 ? physical : _provisioner.Display.ListPhysical());
+            NvidiaSpan.TryApplyScanoutBlend(mapped, overlap, gamma, gain);
+        }
     }
 
     private void ToggleJuntaTest(bool show)
@@ -765,19 +840,33 @@ internal sealed class TrayApp : ApplicationContext
     private void ShowTestScreen(bool juntaWhite, bool stayOpen)
     {
         var status = _last ?? _provisioner.GetStatus();
-        if (!status.MonitorActive || status.AdapterDeviceName is null)
+        if (!status.MonitorActive && status.Surround is null)
         {
-            MessageBox.Show("O monitor virtual não está ativo.", "Monitor Virtual",
+            MessageBox.Show("O telão / monitor virtual não está ativo.", "Monitor Virtual",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        var screen = Screen.AllScreens.FirstOrDefault(s =>
-            string.Equals(s.DeviceName, status.AdapterDeviceName, StringComparison.OrdinalIgnoreCase));
+        var canvas = GetCanvasBounds();
+        Screen? screen = null;
+        if (canvas is not null)
+        {
+            screen = Screen.AllScreens.FirstOrDefault(s => s.Bounds == canvas.Value)
+                     ?? Screen.AllScreens.FirstOrDefault(s =>
+                         Math.Abs(s.Bounds.Width - canvas.Value.Width) < 64 &&
+                         Math.Abs(s.Bounds.Height - canvas.Value.Height) < 64)
+                     ?? Screen.FromPoint(new Point(canvas.Value.X + 8, canvas.Value.Y + 8));
+        }
+
+        if (screen is null && status.AdapterDeviceName is not null)
+        {
+            screen = Screen.AllScreens.FirstOrDefault(s =>
+                string.Equals(s.DeviceName, status.AdapterDeviceName, StringComparison.OrdinalIgnoreCase));
+        }
 
         if (screen is null)
         {
-            MessageBox.Show("Não foi possível localizar a área do monitor virtual.", "Monitor Virtual",
+            MessageBox.Show("Não foi possível localizar a área do telão.", "Monitor Virtual",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }

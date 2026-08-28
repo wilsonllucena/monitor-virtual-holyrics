@@ -236,9 +236,104 @@ public sealed class DisplayService
         return Commit();
     }
 
+    /// <summary>
+    /// Tira o adaptador do desktop (DEVMODE 0×0). Usado no Surround NVIDIA para o
+    /// IddCx não aparecer como segundo monitor ao lado do telão único.
+    /// </summary>
+    public bool Detach(string adapterDeviceName)
+    {
+        var dm = User32Display.NewDevMode();
+        if (!User32Display.EnumDisplaySettingsExW(
+                adapterDeviceName, User32Display.ENUM_CURRENT_SETTINGS, ref dm, 0))
+        {
+            // já desconectado
+            return true;
+        }
+
+        dm.dmPelsWidth = 0;
+        dm.dmPelsHeight = 0;
+        dm.dmPositionX = 0;
+        dm.dmPositionY = 0;
+        dm.dmFields = User32Display.DM_POSITION | User32Display.DM_PELSWIDTH | User32Display.DM_PELSHEIGHT;
+
+        var rc = User32Display.ChangeDisplaySettingsExW(
+            adapterDeviceName, ref dm, IntPtr.Zero,
+            User32Display.CDS_UPDATEREGISTRY | User32Display.CDS_NORESET, IntPtr.Zero);
+
+        if (rc != User32Display.DISP_CHANGE_SUCCESSFUL)
+        {
+            Log.Warn($"ChangeDisplaySettingsEx(detach {adapterDeviceName}) = {rc}.");
+            return false;
+        }
+
+        return Commit();
+    }
+
+    /// <summary>
+    /// Coloca os monitores em fila a partir de (originX, originY), sem sobrepor o canvas.
+    /// No fallback de overlay o virtual fica em (0,0) e os projetores ao lado — as janelas
+    /// de fatia continuam achando cada um pelo DeviceName.
+    /// </summary>
+    public bool ArrangeInRow(IReadOnlyList<SurroundMonitor> monitors, int originX, int originY)
+    {
+        if (monitors.Count == 0) return true;
+
+        var ordered = monitors
+            .OrderBy(t => t.X)
+            .ThenBy(t => t.DeviceName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var x = originX;
+        var already = true;
+        foreach (var m in ordered)
+        {
+            var geo = GetGeometry(m.DeviceName);
+            if (geo is null || geo.X != x || geo.Y != originY) already = false;
+            x += geo?.Width ?? m.Width;
+        }
+
+        if (already) return true;
+
+        x = originX;
+        var ok = true;
+        foreach (var m in ordered)
+        {
+            if (!ApplyPosition(m.DeviceName, x, originY))
+                ok = false;
+            var geo = GetGeometry(m.DeviceName);
+            x += geo?.Width ?? m.Width;
+        }
+
+        return ok && Commit();
+    }
+
+    /// <summary>O maior monitor físico ligado — no Surround NVIDIA é o telão único.</summary>
+    public (DisplayAdapter Adapter, DisplayGeometry Geometry)? FindLargestPhysical()
+    {
+        (DisplayAdapter Adapter, DisplayGeometry Geometry)? best = null;
+        foreach (var adapter in ListAdapters().Where(a => a.Attached && !a.IsVirtual))
+        {
+            var geo = GetGeometry(adapter.DeviceName);
+            if (geo is null) continue;
+            if (best is null || geo.Width * geo.Height > best.Value.Geometry.Width * best.Value.Geometry.Height)
+                best = (adapter, geo);
+        }
+
+        return best;
+    }
+
     /// <summary>Torna outro monitor o primário, mantendo-o na origem (0,0).</summary>
     public bool MakePrimary(string adapterDeviceName)
     {
+        var adapters = ListAdapters();
+        var current = adapters.FirstOrDefault(a =>
+            string.Equals(a.DeviceName, adapterDeviceName, StringComparison.OrdinalIgnoreCase));
+        if (current is { Primary: true })
+        {
+            var geo = GetGeometry(adapterDeviceName);
+            if (geo is { X: 0, Y: 0 }) return true;
+        }
+
         var dm = User32Display.NewDevMode();
         if (!User32Display.EnumDisplaySettingsExW(
                 adapterDeviceName, User32Display.ENUM_CURRENT_SETTINGS, ref dm, 0))

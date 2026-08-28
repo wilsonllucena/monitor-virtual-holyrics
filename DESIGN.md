@@ -222,28 +222,26 @@ Dois projetores em clone (Win+P Duplicar, ou o Holyrics mandando o mesmo slide p
 duas saídas) produzem **duas cópias** da imagem e uma costura clara no meio. O Windows
 não tem surround nativo sem NVIDIA Surround / AMD Eyefinity.
 
-Caminho escolhido (independente da GPU):
+Caminho escolhido:
 
-1. forçar topologia **Estender** e, se os dois físicos ainda compartilham a origem,
-   posicioná-los lado a lado;
-2. dimensionar o monitor virtual para o canvas único
-   `largura = Σ larguras − overlap × (n−1)` (dois Full HD + 192 px → 3648×1080);
-3. o Holyrics projeta nessa tela só (API: Tela pública = origem do virtual;
-   `screen_2` nos projetores é ocultada);
-4. o app captura o canvas (`CopyFromScreen`) e pinta uma janela sem borda em cada
-   projetor, com fade em cosseno **compensado** (`pow(s, 1/gama)`, padrão 2.2) na
-   zona compartilhada. Sem a inversão, dois projetores somam ~0,44 no meio e a
-   junta fica preta — o preview no monitor (uma tela só, emissiva) não mostra isso.
-   Gama, ganho e largura do fade aplicam-se no próximo quadro nas fatias físicas
-   (menu **Ajustar blend do telão**); o overlay reafirma TOPMOST para o Holyrics
-   não cobrir os projetores com janelas próprias.
+1. **NVIDIA Surround/Mosaic (preferido, GPU NVIDIA).** O driver junta as duas saídas
+   HDMI num único VidPN. O Windows — Configurações de vídeo, taskbar, Holyrics —
+   vê **um** monitor lógico (`Σ larguras − overlap`, ex. 3648×1080). A barra de
+   tarefas é uma faixa contínua no rodapé do telão, igual ao Surround feito no
+   painel NVIDIA. Overposição nativa (`overlapX` positivo); fade complementar via
+   `NvAPI_GPU_SetScanoutIntensity` quando o GPU deixa. O IddCx é **desconectado
+   do desktop** nesse modo, senão apareceria como tela extra.
+2. **Fallback (sem Mosaic / driver recusou).** CCD não faz span: só estende ou
+   clona, e IddCx não dirige HDMI físico. Aí o canvas virtual vira **primário**
+   no tamanho do telão, os projetores ficam ao lado, e o overlay recorta com
+   blend. A taskbar mora no canvas, então atravessa a parede nas fatias; o
+   Windows ainda lista as saídas físicas.
 
-A zona de overlap contém **os mesmos pixels** nas duas fatias — é o que diferencia
-blend de um corte seco ou de um clone. `SurroundEnabled` é opt-in: 1 monitor não
-muda; 3 telas deixam o primário com o operador.
+`SurroundEnabled` é opt-in: 1 monitor não muda; 3 telas deixam o primário com o
+operador. Desligar o surround desfaz o Mosaic **só se este app o tiver ligado**.
 
-Não usamos NVIDIA Surround: quebra o desktop do operador, é específico de vendor e
-não entrega soft-edge de projetor.
+Não dependemos do usuário abrir o painel NVIDIA: o app chama NVAPI
+(`SetDisplayGrids` / topo 1×2) ao ligar o telão.
 
 ## 5. Interface do app (tray)
 

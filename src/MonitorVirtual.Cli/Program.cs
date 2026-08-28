@@ -175,6 +175,20 @@ switch (command)
             return 1;
         }
 
+        var nv = NvidiaSpan.SelfTest();
+        if (nv is not null)
+        {
+            Console.Error.WriteLine("Falha interna no span NVIDIA: " + nv);
+            return 1;
+        }
+
+        var contract = NvidiaSpan.SelfTestPlannerContract();
+        if (contract is not null)
+        {
+            Console.Error.WriteLine("Falha interna no contrato do canvas: " + contract);
+            return 1;
+        }
+
         var display = new DisplayService();
         var physical = display.ListPhysical();
         Console.WriteLine($"Monitores físicos: {physical.Count}");
@@ -188,6 +202,10 @@ switch (command)
         Console.WriteLine($"Surround         : {(cfg.SurroundEnabled ? "ligado" : "desligado")} " +
                           $"overlap={cfg.SurroundBlendOverlap}px gama={cfg.SurroundBlendGamma} " +
                           $"ganho={cfg.SurroundBlendGain} inverter={cfg.SurroundSwap}");
+        Console.WriteLine($"NVIDIA NVAPI     : {(NvidiaSpan.IsAvailable ? "presente" : "ausente")}");
+        var nvidiaNow = NvidiaSpan.DetectActive();
+        if (nvidiaNow is not null)
+            Console.WriteLine($"Span NVIDIA      : {nvidiaNow.Summary}");
 
         var plan = SurroundPlanner.TryCreate(physical, cfg);
         if (plan is null)
@@ -267,16 +285,27 @@ switch (command)
 
             if (args.Any(a => a.Equals("--tela-unica", StringComparison.OrdinalIgnoreCase)))
             {
-                var geo = provisioner.GetStatus().Geometry;
-                if (geo is null)
+                var video = provisioner.GetStatus();
+                var geo = video.Geometry;
+                int x, y, w, h;
+                if (video.Surround is { } span)
                 {
-                    Console.Error.WriteLine("Monitor virtual inativo; não dá para apontar a Tela pública.");
+                    x = span.X; y = span.Y; w = span.Width; h = span.Height;
+                }
+                else if (geo is not null)
+                {
+                    x = geo.X; y = geo.Y; w = geo.Width; h = geo.Height;
+                }
+                else
+                {
+                    Console.Error.WriteLine("Telão/monitor virtual inativo; não dá para apontar a Tela pública.");
                     return 1;
                 }
 
-                var projectors = SurroundPlanner.SelectMonitors(provisioner.Display.ListPhysical(), cfg);
-                var tela = await client.EnsureSinglePublicScreenAsync(
-                    cfg, geo.X, geo.Y, geo.Width, geo.Height, projectors);
+                var projectors = video.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical }
+                    ? Array.Empty<SurroundMonitor>()
+                    : SurroundPlanner.SelectMonitors(provisioner.Display.ListPhysical(), cfg);
+                var tela = await client.EnsureSinglePublicScreenAsync(cfg, x, y, w, h, projectors);
                 if (!tela.Ok)
                 {
                     Console.Error.WriteLine("Não foi possível apontar a Tela pública: " + tela.Error);
@@ -408,6 +437,9 @@ static void PrintStatus(MonitorProvisioner provisioner, AppConfig cfg)
     Console.WriteLine($"Desejado         : {cfg.ResolutionText}, lado {cfg.Side}, ligado={cfg.Enabled}");
     Console.WriteLine($"Surround         : {(cfg.SurroundEnabled ? "ligado" : "desligado")} " +
                       $"(overlap {cfg.SurroundBlendOverlap}px gama {cfg.SurroundBlendGamma} ganho {cfg.SurroundBlendGain})");
+    if (st.Surround is not null)
+        Console.WriteLine($"Span             : {st.Surround.Kind} — {st.Surround.Summary}");
+    Console.WriteLine($"NVIDIA NVAPI     : {(NvidiaSpan.IsAvailable ? "presente" : "ausente")}");
     Console.WriteLine($"Início automático: {(StartupTask.Exists() ? "configurado" : "não configurado")}");
     Console.WriteLine($"Holyrics rodando : {(HolyricsClient.IsRunning() ? "sim" : "não")}");
     Console.WriteLine($"Logs             : {AppPaths.LogDir}");

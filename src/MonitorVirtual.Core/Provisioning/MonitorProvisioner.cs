@@ -15,7 +15,8 @@ public sealed record ProvisionStatus(
     string? AdapterDeviceName,
     string? MonitorName,
     DisplayGeometry? Geometry,
-    string Summary)
+    string Summary,
+    SurroundSurface? Surround = null)
 {
     public static ProvisionStatus NotInstalled(string reason) =>
         new(false, false, false, false, null, null, null, reason);
@@ -56,23 +57,32 @@ public sealed class MonitorProvisioner
     /// <summary>Lê o estado atual sem alterar nada.</summary>
     public ProvisionStatus GetStatus()
     {
+        var nvidia = NvidiaSpan.DetectActive();
         var dev = _driver.GetStatus();
-        if (!dev.Present) return ProvisionStatus.NotInstalled("Driver não instalado.");
+        if (!dev.Present && nvidia is null)
+            return ProvisionStatus.NotInstalled("Driver não instalado.");
 
         var adapter = _display.FindVirtual();
         var geometry = adapter is null ? null : _display.GetGeometry(adapter.DeviceName);
         var active = adapter is { Attached: true };
 
-        var summary = !dev.Enabled
-            ? "Dispositivo desabilitado."
-            : active
-                ? $"Monitor virtual ativo em {geometry?.Width}x{geometry?.Height}@{geometry?.RefreshRate}Hz " +
-                  $"na posição ({geometry?.X},{geometry?.Y})."
-                : "Dispositivo habilitado, aguardando o monitor aparecer.";
+        string summary;
+        if (nvidia is not null)
+            summary = nvidia.Summary;
+        else if (!dev.Present)
+            summary = "Driver não instalado.";
+        else if (!dev.Enabled)
+            summary = "Dispositivo desabilitado.";
+        else if (active)
+            summary = $"Monitor virtual ativo em {geometry?.Width}x{geometry?.Height}@{geometry?.RefreshRate}Hz " +
+                      $"na posição ({geometry?.X},{geometry?.Y}).";
+        else
+            summary = "Dispositivo habilitado, aguardando o monitor aparecer.";
 
         return new ProvisionStatus(
-            true, dev.Enabled, active, _display.IsExtended(),
-            adapter?.DeviceName, adapter?.MonitorName, geometry, summary);
+            dev.Present, dev.Enabled, active, _display.IsExtended(),
+            nvidia?.AdapterDeviceName ?? adapter?.DeviceName,
+            adapter?.MonitorName, geometry, summary, nvidia);
     }
 
     /// <summary>Leva o sistema ao estado descrito na configuração.</summary>
@@ -99,9 +109,16 @@ public sealed class MonitorProvisioner
 
         var width = cfg.Width;
         var height = cfg.Height;
+        SurroundSurface? surround = null;
 
-        if (cfg.Enabled && cfg.SurroundEnabled)
-            (width, height) = ApplySurroundTopology(cfg, width, height);
+        if (cfg.SurroundEnabled)
+            (width, height, surround) = ApplySurroundTopology(cfg, width, height);
+
+        if (surround is { Kind: SurroundSurfaceKind.NvidiaLogical })
+            return FinishNvidiaSpan(surround);
+
+        if (!cfg.SurroundEnabled)
+            NvidiaSpan.TryDisable();
 
         var dev = _driver.GetStatus();
         if (!dev.Present)
@@ -147,7 +164,52 @@ public sealed class MonitorProvisioner
             virtualAdapter = _display.FindVirtual() ?? virtualAdapter;
         }
 
-        // 2) o monitor virtual nunca deve ser o primário
+        var virtName = (_display.FindVirtual() ?? virtualAdapter).DeviceName;
+        var overlayPrimary = surround is { Kind: SurroundSurfaceKind.VirtualOverlay };
+        var selectedProjectors = overlayPrimary
+            ? SurroundPlanner.SelectMonitors(_display.ListPhysical(), cfg)
+            : Array.Empty<SurroundMonitor>();
+        var operatorDesk = overlayPrimary && _display.ListPhysical().Count > selectedProjectors.Count;
+
+        // 2 projetores = o canvas virtual é o desktop (taskbar no telão).
+        // Mesa + 2 projetores = o operador fica com o primário.
+        if (overlayPrimary && !operatorDesk)
+        {
+            var virt = _display.ListAdapters().FirstOrDefault(a => a.IsVirtual);
+            if (virt is { Primary: false, Attached: true })
+            {
+                Log.Info($"Surround overlay: canvas virtual vira primário ({virt.DeviceName}) para a taskbar atravessar o telão.");
+                _display.MakePrimary(virt.DeviceName);
+            }
+
+            virtName = (_display.FindVirtual() ?? virtualAdapter).DeviceName;
+            _display.ApplyMode(virtName, width, height, cfg.RefreshRate, 0, 0);
+            _display.ArrangeInRow(selectedProjectors, width, 0);
+            Thread.Sleep(200);
+
+            return GetStatus() with
+            {
+                Surround = OverlaySurface(width, height, virtName),
+                Summary = OverlaySurface(width, height, virtName).Summary,
+            };
+        }
+
+        if (overlayPrimary && operatorDesk)
+        {
+            virtName = (_display.FindVirtual() ?? virtualAdapter).DeviceName;
+            var (ox, oy) = ComputePosition(cfg, width);
+            _display.ApplyMode(virtName, width, height, cfg.RefreshRate, ox, oy);
+            return GetStatus() with
+            {
+                Surround = OverlaySurface(width, height, virtName) with
+                {
+                    X = ox,
+                    Y = oy,
+                    Summary = $"{width}x{height} canvas (mesa do operador intacta) + blend nos projetores",
+                },
+            };
+        }
+
         if (cfg.NeverPrimary)
         {
             var current = _display.ListAdapters();
@@ -164,18 +226,67 @@ public sealed class MonitorProvisioner
         }
 
         // 3) resolução e posição estáveis (o Holyrics guarda a tela pela posição/índice)
-        var virtName = (_display.FindVirtual() ?? virtualAdapter).DeviceName;
+        virtName = (_display.FindVirtual() ?? virtualAdapter).DeviceName;
         var (x, y) = ComputePosition(cfg, width);
         _display.ApplyMode(virtName, width, height, cfg.RefreshRate, x, y);
 
-        return GetStatus();
+        var status = GetStatus();
+        return surround is null ? status : status with { Surround = surround };
     }
 
     /// <summary>
-    /// Sai do clone, alinha os projetores lado a lado e devolve o tamanho do canvas
-    /// único para o monitor virtual.
+    /// NVIDIA Surround: o Windows já vê um monitor só. Desconectamos o IddCx do
+    /// desktop para ele não aparecer como tela extra (Holyrics/taskbar no telão).
     /// </summary>
-    private (int Width, int Height) ApplySurroundTopology(AppConfig cfg, int width, int height)
+    private ProvisionStatus FinishNvidiaSpan(SurroundSurface surround)
+    {
+        var virt = _display.FindVirtual();
+        if (virt is { Attached: true })
+        {
+            Log.Info($"Surround NVIDIA: desconectando {virt.DeviceName} do desktop (o telão já é o monitor único).");
+            _display.Detach(virt.DeviceName);
+        }
+
+        var largest = _display.FindLargestPhysical();
+        if (largest is not null)
+        {
+            surround = surround with
+            {
+                X = largest.Value.Geometry.X,
+                Y = largest.Value.Geometry.Y,
+                Width = largest.Value.Geometry.Width,
+                Height = largest.Value.Geometry.Height,
+                AdapterDeviceName = largest.Value.Adapter.DeviceName,
+            };
+
+            var others = _display.ListPhysical()
+                .Where(m => !string.Equals(m.DeviceName, largest.Value.Adapter.DeviceName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            // Sem mesa extra, o telão único é o primário (taskbar de ponta a ponta).
+            // Com operador, o primário fica na mesa.
+            if (others.Count == 0 && !largest.Value.Adapter.Primary)
+                _display.MakePrimary(largest.Value.Adapter.DeviceName);
+        }
+
+        var st = GetStatus();
+        return st with
+        {
+            Surround = surround,
+            Summary = surround.Summary,
+        };
+    }
+
+    private static SurroundSurface OverlaySurface(int width, int height, string virtName) =>
+        new(SurroundSurfaceKind.VirtualOverlay, 0, 0, width, height, virtName,
+            $"{width}x{height} canvas primário (taskbar no telão) + blend nas saídas físicas");
+
+    /// <summary>
+    /// Sai do clone, tenta NVIDIA Surround (1 monitor lógico) e, se o driver recusar,
+    /// devolve o canvas IddCx para o overlay. 1 monitor físico não altera nada.
+    /// </summary>
+    private (int Width, int Height, SurroundSurface? Surface) ApplySurroundTopology(
+        AppConfig cfg, int width, int height)
     {
         if (!_display.IsExtended())
         {
@@ -184,12 +295,19 @@ public sealed class MonitorProvisioner
             Thread.Sleep(500);
         }
 
+        var already = NvidiaSpan.DetectActive();
+        if (already is not null)
+        {
+            Log.Info($"Surround NVIDIA já ativo: {already.Summary}.");
+            return (already.Width, already.Height, already);
+        }
+
         var physical = _display.ListPhysical();
         var selected = SurroundPlanner.SelectMonitors(physical, cfg);
         if (selected.Count < 2)
         {
             Log.Info($"Surround ligado, mas há {physical.Count} monitor(es) físico(s); canvas inalterado.");
-            return (width, height);
+            return (width, height, null);
         }
 
         _display.ArrangeSideBySide(selected);
@@ -197,12 +315,23 @@ public sealed class MonitorProvisioner
 
         physical = _display.ListPhysical();
         var plan = SurroundPlanner.TryCreate(physical, cfg);
-        if (plan is null) return (width, height);
+        if (plan is null) return (width, height, null);
 
-        Log.Info($"Surround: {plan.Summary}.");
-        return cfg.SurroundSyncResolution
-            ? (plan.CanvasWidth, plan.CanvasHeight)
-            : (width, height);
+        var nvidia = NvidiaSpan.TryEnable(plan.Monitors, plan.Overlap, cfg.RefreshRate);
+        if (nvidia.Ok && nvidia.Surface is not null)
+        {
+            Log.Info($"Surround: {nvidia.Surface.Summary}.");
+            return (nvidia.Surface.Width, nvidia.Surface.Height, nvidia.Surface);
+        }
+
+        Log.Info($"Surround NVIDIA indisponível ({nvidia.Detail}); canvas virtual primário + blend nas saídas.");
+
+        var canvasW = cfg.SurroundSyncResolution ? plan.CanvasWidth : width;
+        var canvasH = cfg.SurroundSyncResolution ? plan.CanvasHeight : height;
+        var overlay = new SurroundSurface(
+            SurroundSurfaceKind.VirtualOverlay, 0, 0, canvasW, canvasH, null,
+            $"{canvasW}x{canvasH} canvas primário (taskbar no telão) + blend nas saídas físicas");
+        return (canvasW, canvasH, overlay);
     }
 
     private (int X, int Y) ComputePosition(AppConfig cfg, int virtWidth)

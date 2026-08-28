@@ -490,17 +490,20 @@ internal sealed class SettingsForm : Form
         if (!_surround.Checked)
         {
             _surroundHint.Text = physical.Count >= 2
-                ? $"{physical.Count} monitores físicos. Ligue o surround para o telão virar uma tela só " +
-                  "(hoje o Windows em clone mostra o mesmo slide duas vezes)."
+                ? $"{physical.Count} monitores físicos. Ligue o surround para o Windows ver um monitor só " +
+                  "(taskbar contínua no telão, como o Surround da NVIDIA)."
                 : "Um monitor só — o surround fica inativo e nada muda.";
             return;
         }
 
         _surroundHint.Text = plan is null
             ? "Marque pelo menos 2 projetores. Com 1 tela o surround não liga."
-            : $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight} — o Holyrics vê uma tela só. " +
-              "Olhe o TELÃO: faixa preta no meio → aumente gama ou intensidade. " +
-              "Os números valem ao vivo nas fatias dos projetores, não só no preview.";
+            : NvidiaSpan.IsAvailable
+                ? $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight}. GPU NVIDIA: o Windows passa a ver UM monitor " +
+                  "(taskbar de ponta a ponta, como o Surround do painel NVIDIA). " +
+                  "Se o driver recusar, o canvas virtual vira o primário e as fatias vão com blend."
+                : $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight} — canvas virtual primário (taskbar no telão) " +
+                  "e blend nas saídas. Olhe o TELÃO: faixa preta no meio → aumente gama ou intensidade.";
     }
 
     private void NotifyLiveBlend()

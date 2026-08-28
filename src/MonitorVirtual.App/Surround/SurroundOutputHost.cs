@@ -176,6 +176,8 @@ internal sealed class SurroundOutputHost : IDisposable
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
                 g.CompositingMode = CompositingMode.SourceCopy;
                 g.CopyFromScreen(source.X, source.Y, 0, 0, source.Size, CopyPixelOperation.SourceCopy);
+                g.CompositingMode = CompositingMode.SourceOver;
+                DrawHardwareCursor(g, source);
             }
 
             foreach (var output in _outputs)
@@ -194,6 +196,23 @@ internal sealed class SurroundOutputHost : IDisposable
                 _captureFailing = true;
                 Log.Error("Falha ao pintar o telão surround", ex);
             }
+        }
+    }
+
+    private static void DrawHardwareCursor(Graphics g, Rectangle source)
+    {
+        var pos = Control.MousePosition;
+        if (!source.Contains(pos)) return;
+        try
+        {
+            var cursor = Cursor.Current ?? Cursors.Default;
+            var x = pos.X - source.X - cursor.HotSpot.X;
+            var y = pos.Y - source.Y - cursor.HotSpot.Y;
+            cursor.Draw(g, new Rectangle(x, y, cursor.Size.Width, cursor.Size.Height));
+        }
+        catch
+        {
+            // o cursor no telão é cortesia; a captura do canvas não pode cair
         }
     }
 
