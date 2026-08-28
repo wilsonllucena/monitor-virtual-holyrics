@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using MonitorVirtual.Core.Interop;
 using MonitorVirtual.Core.Logging;
+using MonitorVirtual.Core.Surround;
 
 namespace MonitorVirtual.Core.Display;
 
@@ -56,6 +57,29 @@ public sealed class DisplayService
 
     public DisplayAdapter? FindPrimary() => ListAdapters().FirstOrDefault(a => a.Primary);
 
+    /// <summary>Monitores físicos ligados, sem o virtual e sem driver de espelho.</summary>
+    public IReadOnlyList<SurroundMonitor> ListPhysical()
+    {
+        var result = new List<SurroundMonitor>();
+        foreach (var adapter in ListAdapters().Where(a => a.Attached && !a.IsVirtual))
+        {
+            var geo = GetGeometry(adapter.DeviceName);
+            if (geo is null) continue;
+
+            var label = string.IsNullOrWhiteSpace(adapter.MonitorName)
+                ? adapter.DeviceString
+                : adapter.MonitorName;
+
+            result.Add(new SurroundMonitor(
+                adapter.DeviceName,
+                label,
+                adapter.Primary,
+                geo.X, geo.Y, geo.Width, geo.Height));
+        }
+
+        return result;
+    }
+
     private static string? GetMonitorName(string adapterDeviceName)
     {
         var mon = new User32Display.DISPLAY_DEVICE
@@ -104,6 +128,76 @@ public sealed class DisplayService
             .ToList();
 
         return positions.Distinct().Count() == positions.Count;
+    }
+
+    /// <summary>
+    /// Se dois monitores físicos estão no mesmo ponto (clone/espelho), coloca-os
+    /// lado a lado. Sem isso o Windows manda o mesmo quadro nos dois projetores.
+    /// </summary>
+    public bool ArrangeSideBySide(IReadOnlyList<SurroundMonitor> selected)
+    {
+        if (selected.Count < 2) return true;
+
+        var current = selected
+            .Select(m => (Monitor: m, Geo: GetGeometry(m.DeviceName)))
+            .Where(t => t.Geo is not null)
+            .ToList();
+
+        if (current.Count < 2) return false;
+
+        var positions = current.Select(t => (t.Geo!.X, t.Geo.Y)).Distinct().Count();
+        if (positions == current.Count)
+            return true; // já estão em coordenadas distintas (estendido)
+
+        var ordered = current
+            .OrderBy(t => t.Monitor.Primary ? 0 : 1)
+            .ThenBy(t => t.Monitor.DeviceName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var anchor = ordered[0].Geo!;
+        var x = anchor.X;
+        var y = anchor.Y;
+        var ok = true;
+
+        foreach (var item in ordered)
+        {
+            var geo = item.Geo!;
+            if (geo.X != x || geo.Y != y)
+            {
+                if (!ApplyPosition(item.Monitor.DeviceName, x, y))
+                    ok = false;
+            }
+
+            x += geo.Width;
+        }
+
+        return ok && Commit();
+    }
+
+    private bool ApplyPosition(string adapterDeviceName, int x, int y)
+    {
+        var dm = User32Display.NewDevMode();
+        if (!User32Display.EnumDisplaySettingsExW(
+                adapterDeviceName, User32Display.ENUM_CURRENT_SETTINGS, ref dm, 0))
+            return false;
+
+        if (dm.dmPositionX == x && dm.dmPositionY == y) return true;
+
+        dm.dmPositionX = x;
+        dm.dmPositionY = y;
+        dm.dmFields = User32Display.DM_POSITION;
+
+        var rc = User32Display.ChangeDisplaySettingsExW(
+            adapterDeviceName, ref dm, IntPtr.Zero,
+            User32Display.CDS_UPDATEREGISTRY | User32Display.CDS_NORESET, IntPtr.Zero);
+
+        if (rc != User32Display.DISP_CHANGE_SUCCESSFUL)
+        {
+            Log.Warn($"ChangeDisplaySettingsEx(posição {adapterDeviceName} → {x},{y}) = {rc}.");
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>Define resolução, taxa e posição do monitor virtual (aplicado em lote).</summary>

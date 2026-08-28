@@ -27,6 +27,37 @@ public sealed class AppConfig
     /// <summary>Força topologia "Estender" (Win+P) sempre que reconciliar.</summary>
     public bool ForceExtend { get; set; } = true;
 
+    /// <summary>
+    /// Dois projetores viram um telão só: o Holyrics projeta num canvas único
+    /// (ex.: 3840×1080) e o app recorta com soft-edge blend na junta.
+    /// Desligado não altera quem tem 1 monitor ou operador + 1 projetor.
+    /// </summary>
+    public bool SurroundEnabled { get; set; }
+
+    /// <summary>Pixels de overposição na junta. 0 = corte seco; 128–256 para projetores.</summary>
+    public int SurroundBlendOverlap { get; set; } = 192;
+
+    /// <summary>Gama do fade (2.2 é o padrão de projetor). Maior = junta mais escura.</summary>
+    public double SurroundBlendGamma { get; set; } = 2.2;
+
+    /// <summary>Taxa da saída nos projetores físicos.</summary>
+    public int SurroundOutputFps { get; set; } = 24;
+
+    /// <summary>Ajusta a resolução do monitor virtual para o tamanho do canvas surround.</summary>
+    public bool SurroundSyncResolution { get; set; } = true;
+
+    /// <summary>
+    /// Com 3+ telas, ignora o primário (mesa do operador) e usa o resto no telão.
+    /// Com só 2, as duas entram — um deles é o primário do Windows.
+    /// </summary>
+    public bool SurroundPreferNonPrimary { get; set; } = true;
+
+    /// <summary>Troca esquerda/direita se o Windows numerou os projetores ao contrário.</summary>
+    public bool SurroundSwap { get; set; }
+
+    /// <summary>DeviceName dos monitores do telão. Vazio = detecção automática.</summary>
+    public List<string> SurroundDeviceNames { get; set; } = new();
+
     /// <summary>Garante que o monitor virtual nunca seja o primário.</summary>
     public bool NeverPrimary { get; set; } = true;
 
@@ -112,6 +143,11 @@ public sealed class AppConfig
         if (Height < 480) Height = 480;
         if (RefreshRate < 24) RefreshRate = 60;
         if (WatchdogSeconds is not 0 and < 2) WatchdogSeconds = 2;
+        SurroundBlendOverlap = Math.Clamp(SurroundBlendOverlap, 0, 960);
+        if (SurroundBlendGamma < 1) SurroundBlendGamma = 1;
+        if (SurroundBlendGamma > 3) SurroundBlendGamma = 3;
+        SurroundOutputFps = Math.Clamp(SurroundOutputFps, 5, 60);
+        SurroundDeviceNames ??= new();
 
         MigrateHolyricsFields();
         return this;

@@ -7,6 +7,7 @@ using MonitorVirtual.Core.Holyrics;
 using MonitorVirtual.Core.Logging;
 using MonitorVirtual.Core.Provisioning;
 using MonitorVirtual.Core.Startup;
+using MonitorVirtual.Core.Surround;
 
 Log.AddSink(Console.WriteLine);
 AppPaths.EnsureDataDirs();
@@ -15,7 +16,7 @@ var command = (args.FirstOrDefault() ?? "status").ToLowerInvariant();
 var provisioner = new MonitorProvisioner();
 var cfg = AppConfig.Load();
 
-if (command is not ("status" or "displays" or "holyrics" or "apps" or "launch" or "help" or "--help" or "-h")
+if (command is not ("status" or "displays" or "holyrics" or "apps" or "launch" or "surround" or "help" or "--help" or "-h")
     && !Elevation.IsElevated())
 {
     Console.Error.WriteLine("Este comando precisa de um prompt como Administrador.");
@@ -158,6 +159,71 @@ switch (command)
         return 0;
     }
 
+    case "surround":
+    {
+        var self = SurroundPlanner.SelfTest();
+        if (self is not null)
+        {
+            Console.Error.WriteLine("Falha interna no planner de surround: " + self);
+            return 1;
+        }
+
+        var display = new DisplayService();
+        var physical = display.ListPhysical();
+        Console.WriteLine($"Monitores físicos: {physical.Count}");
+        foreach (var m in physical.OrderBy(m => m.X).ThenBy(m => m.DeviceName))
+        {
+            Console.WriteLine(
+                $"  {m.DeviceName,-14} {m.Width}x{m.Height} em ({m.X},{m.Y}) " +
+                $"{(m.Primary ? "primário" : "        ")}  {m.Label}");
+        }
+
+        Console.WriteLine($"Surround         : {(cfg.SurroundEnabled ? "ligado" : "desligado")} " +
+                          $"overlap={cfg.SurroundBlendOverlap}px gama={cfg.SurroundBlendGamma} " +
+                          $"inverter={cfg.SurroundSwap}");
+
+        var plan = SurroundPlanner.TryCreate(physical, cfg);
+        if (plan is null)
+        {
+            Console.WriteLine("Plano            : precisa de 2 projetores físicos.");
+        }
+        else
+        {
+            Console.WriteLine($"Plano            : {plan.Summary}");
+            foreach (var s in plan.Slices)
+            {
+                Console.WriteLine(
+                    $"  {s.DeviceName,-14} canvas [{s.SourceX}..{s.SourceX + s.SourceWidth}) " +
+                    $"saída {s.OutputWidth}x{s.OutputHeight} blend={s.BlendEdge} {s.BlendPixels}px");
+            }
+        }
+
+        var turnOn = args.Any(a => a.Equals("--on", StringComparison.OrdinalIgnoreCase));
+        var turnOff = args.Any(a => a.Equals("--off", StringComparison.OrdinalIgnoreCase));
+        if (!turnOn && !turnOff) return 0;
+
+        if (!Elevation.IsElevated())
+        {
+            Console.Error.WriteLine("Ligar/desligar o surround precisa de um prompt como Administrador.");
+            return 2;
+        }
+
+        cfg.SurroundEnabled = turnOn;
+        for (var i = 1; i < args.Length - 1; i++)
+        {
+            if (args[i].Equals("--overlap", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(args[i + 1], out var overlap))
+                cfg.SurroundBlendOverlap = overlap;
+        }
+
+        cfg.Save();
+        var status = provisioner.Reconcile(cfg);
+        Console.WriteLine(status.Summary);
+        var after = SurroundPlanner.TryCreate(new DisplayService().ListPhysical(), cfg);
+        Console.WriteLine(after is null ? "Canvas: (inativo)" : $"Canvas: {after.Summary}");
+        return 0;
+    }
+
     case "holyrics":
     {
         var client = new HolyricsClient();
@@ -239,6 +305,8 @@ switch (command)
               apps [--detect]             lista (e detecta) os programas que usam o monitor
               launch                      abre os programas configurados, se o monitor estiver ativo
               holyrics [--ndi-fundo]      testa a API; --ndi-fundo inclui o papel de fundo no NDI
+              surround [--on|--off] [--overlap 192]
+                                          detecta projetores e mostra o plano do telão único
               startup-on | startup-off    início automático elevado no logon
             """);
         return 0;
@@ -282,6 +350,8 @@ static void PrintStatus(MonitorProvisioner provisioner, AppConfig cfg)
     Console.WriteLine($"Adaptador        : {st.AdapterDeviceName ?? "-"} / {st.MonitorName ?? "-"}");
     Console.WriteLine($"Geometria        : {(st.Geometry is null ? "-" : $"{st.Geometry.Width}x{st.Geometry.Height}@{st.Geometry.RefreshRate}Hz em ({st.Geometry.X},{st.Geometry.Y})")}");
     Console.WriteLine($"Desejado         : {cfg.ResolutionText}, lado {cfg.Side}, ligado={cfg.Enabled}");
+    Console.WriteLine($"Surround         : {(cfg.SurroundEnabled ? "ligado" : "desligado")} " +
+                      $"(overlap {cfg.SurroundBlendOverlap}px)");
     Console.WriteLine($"Início automático: {(StartupTask.Exists() ? "configurado" : "não configurado")}");
     Console.WriteLine($"Holyrics rodando : {(HolyricsClient.IsRunning() ? "sim" : "não")}");
     Console.WriteLine($"Logs             : {AppPaths.LogDir}");
