@@ -403,7 +403,7 @@ internal sealed class TrayApp : ApplicationContext
 
         var projectors = _last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical }
             ? Array.Empty<SurroundMonitor>()
-            : SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config).ToList();
+            : SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config);
         _holyricsSteerInFlight = true;
         var cfg = _config.Clone();
         var rect = canvas.Value;
