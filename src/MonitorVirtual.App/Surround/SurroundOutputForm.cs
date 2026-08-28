@@ -26,7 +26,6 @@ internal sealed class SurroundOutputForm : Form
         BackColor = Color.Black;
         ShowIcon = false;
         KeyPreview = true;
-        Cursor = Cursors.None;
         SetBounds(slice);
 
         Controls.Add(_canvas);
