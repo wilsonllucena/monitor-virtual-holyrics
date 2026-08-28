@@ -3,6 +3,7 @@ using MonitorVirtual.Core.Config;
 using MonitorVirtual.Core.Devices;
 using MonitorVirtual.Core.Display;
 using MonitorVirtual.Core.Logging;
+using MonitorVirtual.Core.Surround;
 
 namespace MonitorVirtual.Core.Provisioning;
 
@@ -96,6 +97,12 @@ public sealed class MonitorProvisioner
         AppPaths.EnsureDataDirs();
         VddSettings.EnsureRegistryPath();
 
+        var width = cfg.Width;
+        var height = cfg.Height;
+
+        if (cfg.Enabled && cfg.SurroundEnabled)
+            (width, height) = ApplySurroundTopology(cfg, width, height);
+
         var dev = _driver.GetStatus();
         if (!dev.Present)
         {
@@ -106,7 +113,7 @@ public sealed class MonitorProvisioner
         }
 
         // O XML só é lido quando o dispositivo inicia; se mudou, reinicia o dispositivo.
-        var settingsChanged = VddSettings.Write(1, cfg.Width, cfg.Height, cfg.RefreshRate);
+        var settingsChanged = VddSettings.Write(1, width, height, cfg.RefreshRate);
 
         if (!cfg.Enabled)
         {
@@ -131,7 +138,8 @@ public sealed class MonitorProvisioner
             return GetStatus() with { Summary = "Monitor virtual não apareceu na lista de vídeo do Windows." };
 
         // 1) topologia estendida — causa nº 1 de "o Holyrics não projeta"
-        if (cfg.ForceExtend && !_display.IsExtended())
+        //    surround exige Estender: clone/espelho manda o mesmo slide nos dois projetores.
+        if ((cfg.ForceExtend || cfg.SurroundEnabled) && !_display.IsExtended())
         {
             Log.Info("Topologia não está estendida; aplicando Estender.");
             _display.ApplyExtendTopology();
@@ -156,23 +164,67 @@ public sealed class MonitorProvisioner
         }
 
         // 3) resolução e posição estáveis (o Holyrics guarda a tela pela posição/índice)
-        var primary = _display.FindPrimary();
-        var primaryGeo = primary is null ? null : _display.GetGeometry(primary.DeviceName);
-        var (x, y) = ComputePosition(cfg, primaryGeo);
-
         var virtName = (_display.FindVirtual() ?? virtualAdapter).DeviceName;
-        _display.ApplyMode(virtName, cfg.Width, cfg.Height, cfg.RefreshRate, x, y);
+        var (x, y) = ComputePosition(cfg, width);
+        _display.ApplyMode(virtName, width, height, cfg.RefreshRate, x, y);
 
         return GetStatus();
     }
 
-    private static (int X, int Y) ComputePosition(AppConfig cfg, DisplayGeometry? primary)
+    /// <summary>
+    /// Sai do clone, alinha os projetores lado a lado e devolve o tamanho do canvas
+    /// único para o monitor virtual.
+    /// </summary>
+    private (int Width, int Height) ApplySurroundTopology(AppConfig cfg, int width, int height)
     {
-        if (primary is null) return (0, 0);
+        if (!_display.IsExtended())
+        {
+            Log.Info("Surround: Windows estava em clone/espelho; aplicando Estender.");
+            _display.ApplyExtendTopology();
+            Thread.Sleep(500);
+        }
+
+        var physical = _display.ListPhysical();
+        var selected = SurroundPlanner.SelectMonitors(physical, cfg);
+        if (selected.Count < 2)
+        {
+            Log.Info($"Surround ligado, mas há {physical.Count} monitor(es) físico(s); canvas inalterado.");
+            return (width, height);
+        }
+
+        _display.ArrangeSideBySide(selected);
+        Thread.Sleep(200);
+
+        physical = _display.ListPhysical();
+        var plan = SurroundPlanner.TryCreate(physical, cfg);
+        if (plan is null) return (width, height);
+
+        Log.Info($"Surround: {plan.Summary}.");
+        return cfg.SurroundSyncResolution
+            ? (plan.CanvasWidth, plan.CanvasHeight)
+            : (width, height);
+    }
+
+    private (int X, int Y) ComputePosition(AppConfig cfg, int virtWidth)
+    {
+        var physical = _display.ListPhysical();
+        if (physical.Count == 0)
+        {
+            var primary = _display.FindPrimary();
+            var geo = primary is null ? null : _display.GetGeometry(primary.DeviceName);
+            if (geo is null) return (0, 0);
+            return cfg.Side == MonitorSide.Direita
+                ? (geo.X + geo.Width, geo.Y)
+                : (geo.X - virtWidth, geo.Y);
+        }
+
+        var minX = physical.Min(m => m.X);
+        var maxRight = physical.Max(m => m.X + m.Width);
+        var y = physical.FirstOrDefault(m => m.Primary)?.Y ?? physical[0].Y;
 
         return cfg.Side == MonitorSide.Direita
-            ? (primary.X + primary.Width, primary.Y)
-            : (primary.X - cfg.Width, primary.Y);
+            ? (maxRight, y)
+            : (minX - virtWidth, y);
     }
 
     private DisplayAdapter? WaitForVirtualAdapter(TimeSpan timeout)

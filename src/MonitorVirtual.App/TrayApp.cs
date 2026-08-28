@@ -6,6 +6,8 @@ using MonitorVirtual.Core.Holyrics;
 using MonitorVirtual.Core.Logging;
 using MonitorVirtual.Core.Provisioning;
 using MonitorVirtual.Core.Startup;
+using MonitorVirtual.Core.Surround;
+using MonitorVirtual.App.Surround;
 
 namespace MonitorVirtual.App;
 
@@ -20,11 +22,14 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _toggleItem;
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _restartItem;
+    private readonly ToolStripMenuItem _surroundItem;
 
     private AppConfig _config;
     private ProvisionStatus? _last;
     private PreviewForm? _preview;
+    private SurroundOutputHost? _surround;
     private bool _busy;
+    private bool _surroundHintShown;
 
     private readonly HashSet<string> _launched = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _needsRestart = new(StringComparer.OrdinalIgnoreCase);
@@ -48,10 +53,14 @@ internal sealed class TrayApp : ApplicationContext
             Visible = false,
         };
 
+        _surroundItem = new ToolStripMenuItem("Ligar telão surround (2 projetores = 1 tela)", null,
+            (_, _) => ToggleSurround());
+
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_toggleItem);
+        menu.Items.Add(_surroundItem);
         menu.Items.Add(new ToolStripMenuItem("Ver o monitor em uma janela", null, (_, _) => ShowPreview()));
         menu.Items.Add(new ToolStripMenuItem("Testar tela...", null, (_, _) => ShowTestScreen()));
         menu.Items.Add(_restartItem);
@@ -145,6 +154,8 @@ internal sealed class TrayApp : ApplicationContext
         _statusItem.Text = status.Summary;
         _toggleItem.Text = _config.Enabled ? "Desligar monitor virtual" : "Ligar monitor virtual";
 
+        SyncSurround(status, firstRun, silent);
+
         if (firstRun && !silent && !status.DriverInstalled)
             Notify("Driver do monitor virtual não está instalado. Use \"Reparar / reinstalar driver\".",
                 ToolTipIcon.Warning);
@@ -152,6 +163,60 @@ internal sealed class TrayApp : ApplicationContext
         MaybeLaunchApps(status);
         CheckAppOrdering(status, wasActive, silent);
         MaybeFixHolyricsNdi(silent);
+    }
+
+    private void ToggleSurround()
+    {
+        _config.SurroundEnabled = !_config.SurroundEnabled;
+        _config.Save();
+        RunReconcile();
+    }
+
+    /// <summary>
+    /// Depois do monitor virtual pronto, cobre os projetores com as fatias do canvas
+    /// (antes de abrir o Holyrics). Clone/espelho fica para trás: cada lado mostra
+    /// metade do slide, com blend na junta.
+    /// </summary>
+    private void SyncSurround(ProvisionStatus status, bool firstRun, bool silent)
+    {
+        _surroundItem.Text = _config.SurroundEnabled
+            ? "Desligar telão surround"
+            : "Ligar telão surround (2 projetores = 1 tela)";
+        _surroundItem.Checked = _config.SurroundEnabled;
+
+        var physical = _provisioner.Display.ListPhysical();
+
+        if (!_config.SurroundEnabled || !status.MonitorActive)
+        {
+            _surround?.Stop();
+
+            if (firstRun && !silent && !_config.SurroundEnabled && physical.Count >= 2 && !_surroundHintShown)
+            {
+                _surroundHintShown = true;
+                Notify("Dois monitores detectados. Se o telão está repetindo o mesmo slide, " +
+                       "ligue Telão surround no menu.", ToolTipIcon.Info);
+            }
+
+            return;
+        }
+
+        var plan = SurroundPlanner.TryCreate(physical, _config);
+        if (plan is null)
+        {
+            _surround?.Stop();
+            if (firstRun && !silent)
+                Notify("Surround ligado, mas precisa de 2 projetores físicos. Nada foi alterado.",
+                    ToolTipIcon.Warning);
+            return;
+        }
+
+        _surround ??= new SurroundOutputHost(GetVirtualBounds);
+        _surround.Start(plan, _config.SurroundOutputFps, _config.SurroundBlendGamma);
+        _statusItem.Text = $"{status.Summary} · {plan.Summary}";
+
+        if (firstRun && !silent)
+            Notify($"Telão surround ativo: {plan.Summary}. No Holyrics, escolha a tela Virtual Display Driver.",
+                ToolTipIcon.Info);
     }
 
     /// <summary>
@@ -355,8 +420,13 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ShowSettings()
     {
+        _surround?.Pause();
         using var form = new SettingsForm(_config.Clone(), _provisioner);
-        if (form.ShowDialog() != DialogResult.OK) return;
+        if (form.ShowDialog() != DialogResult.OK)
+        {
+            _surround?.Resume();
+            return;
+        }
 
         _config = form.Result;
         _config.Save();
@@ -397,7 +467,7 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        new TestScreenForm(screen).Show();
+        new TestScreenForm(screen, _config.SurroundEnabled ? _config.SurroundBlendOverlap : 0).Show();
     }
 
     private void Repair()
@@ -464,6 +534,8 @@ internal sealed class TrayApp : ApplicationContext
         _watchdog.Stop();
         SystemEvents.DisplaySettingsChanged -= OnSystemChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        _surround?.Dispose();
+        _surround = null;
         _tray.Visible = false;
         _tray.Dispose();
         ExitThread();

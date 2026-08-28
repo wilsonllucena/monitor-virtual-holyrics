@@ -216,10 +216,34 @@ Resolume) é mais eficiente que capturar um monitor virtual. O monitor virtual �
 certa quando algo precisa de uma *tela de verdade* — projeção sem projetor, ensaio, tela de
 palco a mais, streaming via Sunshine/Parsec.
 
+## 4.2 Telão surround + soft-edge blend
+
+Dois projetores em clone (Win+P Duplicar, ou o Holyrics mandando o mesmo slide para as
+duas saídas) produzem **duas cópias** da imagem e uma costura clara no meio. O Windows
+não tem surround nativo sem NVIDIA Surround / AMD Eyefinity.
+
+Caminho escolhido (independente da GPU):
+
+1. forçar topologia **Estender** e, se os dois físicos ainda compartilham a origem,
+   posicioná-los lado a lado;
+2. dimensionar o monitor virtual para o canvas único
+   `largura = Σ larguras − overlap × (n−1)` (dois Full HD + 192 px → 3648×1080);
+3. o Holyrics projeta nessa tela só;
+4. o app captura o canvas (`CopyFromScreen`) e pinta uma janela sem borda em cada
+   projetor, com fade em cosseno + gama 2.2 na zona compartilhada.
+
+A zona de overlap contém **os mesmos pixels** nas duas fatias — é o que diferencia
+blend de um corte seco ou de um clone. `SurroundEnabled` é opt-in: 1 monitor não
+muda; 3 telas deixam o primário com o operador.
+
+Não usamos NVIDIA Surround: quebra o desktop do operador, é específico de vendor e
+não entrega soft-edge de projetor.
+
 ## 5. Interface do app (tray)
 
 - Chave liga/desliga **Monitor Virtual** (efeito imediato, sem UAC).
-- Resolução: `1920×1080` (padrão), `1280×720`, `3840×2160`, personalizada.
+- Chave **Telão surround** (2 projetores = 1 tela, com overposição configurável).
+- Resolução: `1920×1080` (padrão), `1280×720`, `3840×1080` (2× Full HD), `3840×2160`, personalizada.
 - Nome amigável exibido: `Projecao Holyrics`.
 - "Iniciar com o Windows" / "Iniciar o Holyrics junto".
 - Botão **Testar tela** — janela full-screen colorida no monitor virtual, confirma que o

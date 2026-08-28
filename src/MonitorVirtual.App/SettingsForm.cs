@@ -2,6 +2,7 @@ using MonitorVirtual.Core.Apps;
 using MonitorVirtual.Core.Config;
 using MonitorVirtual.Core.Holyrics;
 using MonitorVirtual.Core.Provisioning;
+using MonitorVirtual.Core.Surround;
 
 namespace MonitorVirtual.App;
 
@@ -14,6 +15,7 @@ internal sealed class SettingsForm : Form
         ("1600 x 900", 1600, 900),
         ("1920 x 1080 (Full HD)", 1920, 1080),
         ("2560 x 1440 (QHD)", 2560, 1440),
+        ("3840 x 1080 (2x Full HD)", 3840, 1080),
         ("3840 x 2160 (4K)", 3840, 2160),
     };
 
@@ -53,6 +55,30 @@ internal sealed class SettingsForm : Form
         { Text = "Iniciar com o Windows (elevado, sem UAC)", AutoSize = true };
     private readonly Label _statusLabel = new() { AutoSize = true, MaximumSize = new Size(460, 0) };
 
+    private readonly CheckBox _surround = new()
+    {
+        Text = "Telão surround (2 projetores = uma tela só)",
+        AutoSize = true,
+    };
+    private readonly CheckedListBox _surroundMonitors = new()
+    {
+        Width = 350,
+        Height = 72,
+        CheckOnClick = true,
+    };
+    private readonly NumericUpDown _blendOverlap = new()
+        { Minimum = 0, Maximum = 640, Increment = 16, Width = 70 };
+    private readonly NumericUpDown _blendGamma = new()
+        { Minimum = 1, Maximum = 3, DecimalPlaces = 1, Increment = 0.1M, Width = 70 };
+    private readonly CheckBox _surroundSwap = new()
+        { Text = "Inverter esquerda/direita", AutoSize = true };
+    private readonly Label _surroundHint = new()
+    {
+        AutoSize = true,
+        MaximumSize = new Size(460, 0),
+        ForeColor = SystemColors.GrayText,
+    };
+
     private int _customWidth = 1920;
     private int _customHeight = 1080;
 
@@ -70,7 +96,8 @@ internal sealed class SettingsForm : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(510, 754);
+        AutoScroll = true;
+        ClientSize = new Size(530, 680);
 
         BuildLayout();
         LoadFrom(config);
@@ -97,6 +124,26 @@ internal sealed class SettingsForm : Form
         Add(monitorBox, _neverPrimary, 14, my); my += 28;
         Add(monitorBox, new Label { Text = "Verificar a cada (s):", AutoSize = true }, 14, my + 4);
         Add(monitorBox, _watchdog, 140, my);
+
+        // --- telão surround ---
+        var surroundBox = Group("Telão surround / blending", ref y, 228);
+        Controls.Add(surroundBox);
+        var sy0 = 22;
+        Add(surroundBox, _surround, 14, sy0); sy0 += 24;
+        Add(surroundBox, _surroundMonitors, 14, sy0);
+        var detectMon = new Button { Text = "Detectar", Width = 110, Left = 372, Top = sy0 };
+        detectMon.Click += (_, _) => RefreshSurroundMonitors(selectDetected: true);
+        surroundBox.Controls.Add(detectMon);
+        sy0 += 78;
+        Add(surroundBox, new Label { Text = "Overposição (px):", AutoSize = true }, 14, sy0 + 4);
+        Add(surroundBox, _blendOverlap, 128, sy0);
+        Add(surroundBox, new Label { Text = "Gama:", AutoSize = true }, 214, sy0 + 4);
+        Add(surroundBox, _blendGamma, 258, sy0);
+        Add(surroundBox, _surroundSwap, 340, sy0 + 4); sy0 += 30;
+        Add(surroundBox, _surroundHint, 14, sy0);
+        _surround.CheckedChanged += (_, _) => UpdateSurroundHint();
+        _blendOverlap.ValueChanged += (_, _) => UpdateSurroundHint();
+        _surroundMonitors.ItemCheck += (_, _) => BeginInvoke(new Action(UpdateSurroundHint));
 
         // --- programas que usam o monitor ---
         var appsBox = Group("Programas que usam o monitor (abrem depois dele)", ref y, 190);
@@ -310,6 +357,13 @@ internal sealed class SettingsForm : Form
 
         _customWidth = cfg.Width;
         _customHeight = cfg.Height;
+
+        _surround.Checked = cfg.SurroundEnabled;
+        _blendOverlap.Value = Math.Clamp(cfg.SurroundBlendOverlap, 0, 640);
+        _blendGamma.Value = (decimal)Math.Clamp(cfg.SurroundBlendGamma, 1, 3);
+        _surroundSwap.Checked = cfg.SurroundSwap;
+        RefreshSurroundMonitors(selectDetected: false, selectedNames: cfg.SurroundDeviceNames);
+        UpdateSurroundHint();
     }
 
     private void OnResolutionChanged()
@@ -354,7 +408,82 @@ internal sealed class SettingsForm : Form
         cfg.HolyricsApiToken = string.IsNullOrWhiteSpace(_apiToken.Text) ? null : _apiToken.Text.Trim();
         cfg.HolyricsIncludeNdiBackground = _ndiBackground.Checked;
 
+        cfg.SurroundEnabled = _surround.Checked;
+        cfg.SurroundBlendOverlap = (int)_blendOverlap.Value;
+        cfg.SurroundBlendGamma = (double)_blendGamma.Value;
+        cfg.SurroundSwap = _surroundSwap.Checked;
+        cfg.SurroundDeviceNames = _surroundMonitors.CheckedItems
+            .Cast<SurroundMonitorItem>()
+            .Select(i => i.DeviceName)
+            .ToList();
+
         cfg.StartWithWindows = _startWithWindows.Checked;
+    }
+
+    private void RefreshSurroundMonitors(bool selectDetected, IReadOnlyList<string>? selectedNames = null)
+    {
+        var physical = _provisioner.Display.ListPhysical();
+        var wanted = selectedNames is { Count: > 0 }
+            ? new HashSet<string>(selectedNames, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        _surroundMonitors.Items.Clear();
+        foreach (var m in physical.OrderBy(m => m.X).ThenBy(m => m.DeviceName))
+        {
+            var item = new SurroundMonitorItem(m);
+            var check = wanted is not null
+                ? wanted.Contains(m.DeviceName)
+                : selectDetected || physical.Count >= 2;
+            _surroundMonitors.Items.Add(item, check);
+        }
+
+        UpdateSurroundHint();
+    }
+
+    private void UpdateSurroundHint()
+    {
+        var physical = _provisioner.Display.ListPhysical();
+        if (physical.Count == 0)
+        {
+            _surroundHint.Text = "Nenhum monitor físico detectado.";
+            return;
+        }
+
+        var probe = new AppConfig
+        {
+            SurroundEnabled = _surround.Checked,
+            SurroundBlendOverlap = (int)_blendOverlap.Value,
+            SurroundSwap = _surroundSwap.Checked,
+            SurroundPreferNonPrimary = true,
+            SurroundDeviceNames = _surroundMonitors.CheckedItems
+                .Cast<SurroundMonitorItem>()
+                .Select(i => i.DeviceName)
+                .ToList(),
+        };
+
+        var plan = SurroundPlanner.TryCreate(physical, probe);
+        if (!_surround.Checked)
+        {
+            _surroundHint.Text = physical.Count >= 2
+                ? $"{physical.Count} monitores físicos. Ligue o surround para o telão virar uma tela só " +
+                  "(hoje o Windows em clone mostra o mesmo slide duas vezes)."
+                : "Um monitor só — o surround fica inativo e nada muda.";
+            return;
+        }
+
+        _surroundHint.Text = plan is null
+            ? "Marque pelo menos 2 projetores. Com 1 tela o surround não liga."
+            : $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight} — o Holyrics vê uma tela só. " +
+              $"Ajuste a overposição até a costura do meio desaparecer.";
+    }
+
+    private sealed record SurroundMonitorItem(MonitorVirtual.Core.Surround.SurroundMonitor Monitor)
+    {
+        public string DeviceName => Monitor.DeviceName;
+        public override string ToString() =>
+            $"{Monitor.DeviceName}  {Monitor.Width}×{Monitor.Height}" +
+            (Monitor.Primary ? "  (primário)" : "") +
+            $"  {Monitor.Label}";
     }
 
     private async Task TestApiAsync()

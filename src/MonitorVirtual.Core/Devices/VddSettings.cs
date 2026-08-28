@@ -62,6 +62,7 @@ public static class VddSettings
             (1600, 900),
             (1920, 1080),
             (2560, 1440),
+            (3840, 1080),
             (3840, 2160),
             (width, height),
         }.Distinct().OrderBy(r => r.W).ThenBy(r => r.H).ToArray();
