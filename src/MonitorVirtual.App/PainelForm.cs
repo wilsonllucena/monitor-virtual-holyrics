@@ -37,32 +37,37 @@ internal sealed class PainelForm : Form
         ClientSize = new Size(420, 268);
         Font = SystemFonts.MessageBoxFont;
 
+        var tip = new ToolTip { ShowAlways = true };
+
         var iconBox = new PictureBox
         {
-            Image = IconFactory.AppIcon.ToBitmap(),
+            Image = IconFactory.Paint(48, trayActive: false, branded: true),
             SizeMode = PictureBoxSizeMode.Zoom,
             Left = 16,
-            Top = 16,
-            Size = new Size(40, 40),
+            Top = 12,
+            Size = new Size(48, 48),
+            Cursor = Cursors.Hand,
         };
+        iconBox.Click += (_, _) => _showBlend();
+        tip.SetToolTip(iconBox, "Ajustar blend do telão");
 
         var title = new Label
         {
             Text = "Monitor Virtual para Holyrics",
             Font = new Font(Font, FontStyle.Bold),
             AutoSize = true,
-            Left = 64,
-            Top = 18,
+            Left = 72,
+            Top = 14,
         };
 
         var subtitle = new Label
         {
-            Text = "Esta janela não some sozinha. Use os botões — olhe o telão, não o preview.",
+            Text = "Clique no ícone ou no botão para ajustar o blend — olhe o telão, não o preview.",
             AutoSize = true,
             MaximumSize = new Size(330, 0),
             ForeColor = SystemColors.GrayText,
-            Left = 64,
-            Top = 38,
+            Left = 72,
+            Top = 34,
         };
 
         _status.Left = 16;
@@ -77,7 +82,13 @@ internal sealed class PainelForm : Form
         _blend.Size = new Size(388, 44);
         _blend.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold);
         _blend.FlatStyle = FlatStyle.Flat;
+        _blend.Image = IconFactory.UiBitmap;
+        _blend.TextImageRelation = TextImageRelation.ImageBeforeText;
+        _blend.ImageAlign = ContentAlignment.MiddleLeft;
+        _blend.Padding = new Padding(10, 0, 8, 0);
+        _blend.Cursor = Cursors.Hand;
         _blend.Click += (_, _) => _showBlend();
+        tip.SetToolTip(_blend, "Ajustar blend do telão");
 
         var settings = NewButton("Configurações...", 16, 174, _showSettings);
         var preview = NewButton("Ver o monitor", 216, 174, _showPreview);

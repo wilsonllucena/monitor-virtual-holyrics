@@ -42,7 +42,7 @@ resolução, posição e pode receber a projeção. A diferença é que não exi
 
 Ao final o instalador já deixa tudo pronto: driver instalado, monitor virtual criado, o
 ícone perto do relógio (bandeja) e a janela **Monitor Virtual** na barra de tarefas
-(ícone verde do monitor). Clique nela — ou clique **esquerdo** no ícone da bandeja — para
+(dois projetores + junta azul). Clique nela — ou clique **esquerdo** no ícone da bandeja — para
 abrir Configurações e **Ajustar blend do telão** sem depender do menu de clique direito.
 
 **Nada de reiniciar o computador**: a tela nova aparece na hora.
@@ -78,9 +78,11 @@ seguida e já enxerga a tela.
 ## Usando no dia a dia
 
 O programa tem **duas** portas de entrada, de propósito: o menu da bandeja e a janela
-na barra de tarefas (ícone verde). Clique **esquerdo** no ícone perto do relógio abre a
-janela. Clique **direito** abre o menu. **Duplo clique** no ícone, com o telão surround
-ligado, abre direto **Ajustar blend do telão**.
+na barra de tarefas. O ícone é o mesmo nos dois sítios: **dois projetores cinza e a
+junta azul no meio** (atalho da área de trabalho, exe, taskbar e janela). Clique
+**esquerdo** no ícone perto do relógio abre a janela. Clique **direito** abre o menu.
+**Duplo clique** no ícone, com o telão surround ligado, abre direto **Ajustar blend do telão**.
+Clique no ícone dentro da janela também abre o blend.
 
 | Opção | O que faz |
 |---|---|

@@ -37,6 +37,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 MinVersion=10.0.19041
+SetupIconFile=..\src\MonitorVirtual.App\app.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
 ; sem AppMutex de propósito: em instalação silenciosa ele cancela o setup em vez de
 ; fechar o app. Quem encerra a instância antiga é o PrepareToInstall (taskkill), que

@@ -104,7 +104,7 @@ internal sealed class PreviewForm : Form
 
         var programa = new ToolStripMenuItem("Programa");
         var settings = new ToolStripMenuItem("Configurações...", null, (_, _) => _showSettings?.Invoke());
-        var blend = new ToolStripMenuItem("Ajustar blend do telão...", null, (_, _) => _showBlend?.Invoke())
+        var blend = new ToolStripMenuItem("Ajustar blend do telão...", IconFactory.UiBitmap, (_, _) => _showBlend?.Invoke())
         {
             Enabled = _blendEnabled?.Invoke() ?? false,
         };
@@ -115,10 +115,15 @@ internal sealed class PreviewForm : Form
 
         if (_showSettings is not null || _showBlend is not null)
         {
-            var tools = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden };
+            var tools = new ToolStrip
+            {
+                GripStyle = ToolStripGripStyle.Hidden,
+                ImageScalingSize = new Size(24, 24),
+            };
             var blendBtn = new ToolStripButton("Ajustar blend do telão")
             {
-                DisplayStyle = ToolStripItemDisplayStyle.Text,
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                Image = IconFactory.UiBitmap,
                 Font = new Font(SystemFonts.MenuFont ?? Font, FontStyle.Bold),
                 Enabled = _blendEnabled?.Invoke() ?? false,
             };

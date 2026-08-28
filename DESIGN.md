@@ -256,6 +256,10 @@ não entrega soft-edge de projetor.
   `ApplicationContext` da bandeja sozinho não deixa o app na taskbar; o painel é a
   presença visível. Clique esquerdo no `NotifyIcon` abre este painel — não depende
   do `ContextMenuStrip` persistir.
+- Ícone do produto (`app.ico` + `IconFactory`): dois projetores cinza e junta azul
+  no meio — o visual do atalho da área de trabalho e da taskbar. O `.exe` embarca
+  o `.ico` (`ApplicationIcon`); a bandeja fica verde quando o monitor está ativo.
+  Clique no ícone dentro da janela abre **Ajustar blend do telão**.
 - Overlays das fatias: `WS_EX_NOACTIVATE` + `WS_EX_TRANSPARENT`, `KeepOnTop` sem
   `SWP_SHOWWINDOW`, e pausa de z-order enquanto o menu da bandeja está aberto.
   Sem isso o Windows 10 fecha o menu sozinho (foco roubado / overflow da bandeja).
