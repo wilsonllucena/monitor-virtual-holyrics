@@ -2,15 +2,10 @@ using MonitorVirtual.Core.Surround;
 
 namespace MonitorVirtual.App.Surround;
 
-/// <summary>Janela sem borda em cima de um projetor, mostrando a fatia do canvas.</summary>
+/// <summary>Janela sem borda em cima de um projetor, mostrando a fatia do canvas 1:1.</summary>
 internal sealed class SurroundOutputForm : Form
 {
-    private readonly PictureBox _canvas = new()
-    {
-        Dock = DockStyle.Fill,
-        SizeMode = PictureBoxSizeMode.StretchImage,
-        BackColor = Color.Black,
-    };
+    private Bitmap? _frame;
 
     public string DeviceName { get; }
     private bool _allowClose;
@@ -26,9 +21,8 @@ internal sealed class SurroundOutputForm : Form
         BackColor = Color.Black;
         ShowIcon = false;
         KeyPreview = true;
+        DoubleBuffered = true;
         SetBounds(slice);
-
-        Controls.Add(_canvas);
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -47,18 +41,44 @@ internal sealed class SurroundOutputForm : Form
 
     public void SetBounds(SurroundSlice slice)
     {
-        var screen = Screen.AllScreens.FirstOrDefault(s =>
-            string.Equals(s.DeviceName, slice.DeviceName, StringComparison.OrdinalIgnoreCase));
-
-        var next = screen?.Bounds
+        Rectangle next;
+        if (slice.PinOutput)
+        {
+            next = new Rectangle(slice.OutputX, slice.OutputY, slice.OutputWidth, slice.OutputHeight);
+        }
+        else
+        {
+            var screen = Screen.AllScreens.FirstOrDefault(s =>
+                string.Equals(s.DeviceName, slice.DeviceName, StringComparison.OrdinalIgnoreCase));
+            next = screen?.Bounds
                    ?? new Rectangle(slice.OutputX, slice.OutputY, slice.OutputWidth, slice.OutputHeight);
+        }
+
         if (Bounds != next) Bounds = next;
     }
 
     public void Present(Bitmap? frame)
     {
-        _canvas.Image = frame;
-        if (frame is not null) _canvas.Invalidate();
+        _frame = frame;
+        Invalidate();
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        // o OnPaint pinta o quadro inteiro
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+        g.Clear(Color.Black);
+        if (_frame is null) return;
+
+        // 1:1 — StretchImage deslocava a letra na junta (1 px já vira costura).
+        g.DrawImageUnscaled(_frame, 0, 0);
     }
 
     /// <summary>

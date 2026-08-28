@@ -68,6 +68,14 @@ public static class SoftEdgeCurve
         if (boosted[5] <= projector[5])
             return "ganho 1.5 deveria aumentar o meio da junta";
 
+        // Luz na parede: pixel^(gama) soma ~1.0 no overlap — senão faixa BRANCA (2.0) ou PRETA.
+        for (var i = 0; i < projector.Length; i++)
+        {
+            var light = MathF.Pow(projector[i], 2.2f) + MathF.Pow(projector[projector.Length - 1 - i], 2.2f);
+            if (Math.Abs(light - 1f) > 0.08f)
+                return $"gama 2.2 em luz deveria somar 1 em i={i} (soma {light})";
+        }
+
         var clamped = BuildLut(8, 2.2, 2.5);
         if (clamped.Any(v => v is < 0f or > 1f))
             return "LUT saiu do intervalo 0–1";

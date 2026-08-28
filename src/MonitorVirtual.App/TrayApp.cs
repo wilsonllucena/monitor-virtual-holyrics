@@ -281,7 +281,9 @@ internal sealed class TrayApp : ApplicationContext
     /// Depois do monitor virtual pronto, cobre os projetores com as fatias do canvas
     /// (antes de abrir o Holyrics). Clone/espelho fica para trás: cada lado mostra
     /// metade do slide, com blend na junta.
-    /// Com NVIDIA Surround o Windows já vê um monitor só — sem overlay.
+    /// Com NVIDIA Surround o Windows vê um monitor só — o overlay ainda pinta as
+    /// duas metades a partir do canvas virtual (Mosaic no GeForce não compartilha
+    /// pixels na junta).
     /// </summary>
     private void SyncSurround(ProvisionStatus status, bool firstRun, bool silent)
     {
@@ -309,23 +311,6 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        if (nvidia)
-        {
-            _surround?.Stop();
-            _blendItem.Enabled = true;
-            _statusItem.Text = status.Summary;
-            MaybeSteerHolyrics(silent);
-
-            if (firstRun && !silent)
-            {
-                Notify($"{status.Summary}. A barra de tarefas atravessa o telão como um monitor só. " +
-                       "Abra a janela do Monitor Virtual (clique no ícone da bandeja) e use «Ajustar blend do telão».",
-                    ToolTipIcon.Info);
-                ShowPainel();
-            }
-            return;
-        }
-
         if (!status.MonitorActive && status.Surround is null)
         {
             _surround?.Stop();
@@ -339,6 +324,17 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         var plan = SurroundPlanner.TryCreate(physical, _config);
+        if (plan is null && nvidia && status.Surround is { } span)
+        {
+            var (leftW, rightW, _) = NvidiaSpan.NativeHalves();
+            var spanMon = new SurroundMonitor(
+                span.AdapterDeviceName ?? @"\\.\DISPLAY1", "Telão", true,
+                span.X, span.Y, span.Width, span.Height);
+            plan = SurroundPlanner.TryCreateFromLogicalSpan(
+                spanMon, _config.SurroundBlendOverlap, _config.SurroundSwap,
+                leftW, rightW, _config.SurroundAlignLeftX, _config.SurroundAlignRightX);
+        }
+
         if (plan is null)
         {
             _surround?.Stop();
@@ -354,7 +350,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             RaiseOperatorUi = RaiseOperatorWindows,
         };
-        _surround.Start(plan, _config.SurroundOutputFps, _config.SurroundBlendGamma, _config.SurroundBlendGain);
+        _surround.Start(plan, _config.SurroundOutputFps, _config.SurroundBlendGamma, _config.SurroundBlendGain,
+            _config.SurroundAlignLeftX, _config.SurroundAlignRightX);
         _statusItem.Text = status.Surround?.Summary ?? $"{status.Summary} · {plan.Summary}";
         _blendItem.Enabled = true;
 
@@ -364,8 +361,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             Notify(
                 (status.Surround?.Summary ?? plan.Summary) +
-                ". Canvas virtual é o primário: a taskbar atravessa o telão. " +
-                "Abra a janela do Monitor Virtual (clique no ícone da bandeja) e use «Ajustar blend do telão».",
+                ". A letra segue o monitor virtual; o blend some a junta no telão. " +
+                "Abra «Ajustar blend do telão» e olhe a parede.",
                 ToolTipIcon.Info);
             ShowPainel();
         }
@@ -401,9 +398,16 @@ internal sealed class TrayApp : ApplicationContext
         var canvas = GetCanvasBounds();
         if (canvas is null) return;
 
-        var projectors = _last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical }
-            ? Array.Empty<SurroundMonitor>()
-            : SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config);
+        var projectors = SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config);
+        if (projectors.Count < 2 && _last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical } span)
+        {
+            projectors = new[]
+            {
+                new SurroundMonitor(
+                    span.AdapterDeviceName ?? @"\\.\DISPLAY1", "Telão", true,
+                    span.X, span.Y, span.Width, span.Height),
+            };
+        }
         _holyricsSteerInFlight = true;
         var cfg = _config.Clone();
         var rect = canvas.Value;
@@ -439,12 +443,12 @@ internal sealed class TrayApp : ApplicationContext
                 _holyricsSteerFailures = 0;
                 if (result.Changed && !silent)
                     Notify(
-                        nvidiaSpan
-                            ? "Holyrics: Tela pública no telão único (um monitor, taskbar contínua)."
-                            : "Holyrics: Tela pública no monitor virtual (canvas único). " +
-                              (result.HiddenScreens > 0
-                                  ? $"{result.HiddenScreens} tela(s) extra(s) nos projetores foram ocultadas."
-                                  : "As duas saídas físicas não recebem mais o slide direto."),
+                        "Holyrics: Tela pública no monitor virtual (canvas único). " +
+                        (result.HiddenScreens > 0
+                            ? $"{result.HiddenScreens} tela(s) extra(s) nos projetores foram ocultadas."
+                            : nvidiaSpan
+                                ? "A letra segue o canvas; o overlay cobre o span NVIDIA."
+                                : "As duas saídas físicas não recebem mais o slide direto."),
                         ToolTipIcon.Info);
             });
         });
@@ -656,31 +660,34 @@ internal sealed class TrayApp : ApplicationContext
 
     private Rectangle? GetCanvasBounds()
     {
-        var status = _last ?? _provisioner.GetStatus();
-        if (status.Surround is { } surface)
+        // A composição do Holyrics vive no monitor virtual. Capturar o span
+        // NVIDIA (3840 seco) era o que cortava a letra no meio do telão.
+        var virt = _provisioner.Display.FindVirtual();
+        if (virt is { Attached: true })
         {
-            if (!string.IsNullOrWhiteSpace(surface.AdapterDeviceName))
-            {
-                var named = Screen.AllScreens.FirstOrDefault(s =>
-                    string.Equals(s.DeviceName, surface.AdapterDeviceName, StringComparison.OrdinalIgnoreCase));
-                if (named is not null) return named.Bounds;
-            }
+            var geo = _provisioner.Display.GetGeometry(virt.DeviceName);
+            if (geo is { Width: > 0, Height: > 0 })
+                return new Rectangle(geo.X, geo.Y, geo.Width, geo.Height);
 
-            var bySize = Screen.AllScreens
-                .OrderByDescending(s => s.Bounds.Width)
-                .FirstOrDefault(s => s.Bounds.Width >= surface.Width - 64);
-            if (bySize is not null) return bySize.Bounds;
-
-            return new Rectangle(surface.X, surface.Y, surface.Width, surface.Height);
+            var named = Screen.AllScreens.FirstOrDefault(s =>
+                string.Equals(s.DeviceName, virt.DeviceName, StringComparison.OrdinalIgnoreCase));
+            if (named is not null) return named.Bounds;
         }
 
+        var status = _last ?? _provisioner.GetStatus();
         var name = status.AdapterDeviceName;
-        if (name is null) return null;
+        if (name is not null && (virt is null ||
+            string.Equals(name, virt.DeviceName, StringComparison.OrdinalIgnoreCase)))
+        {
+            var screen = Screen.AllScreens.FirstOrDefault(s =>
+                string.Equals(s.DeviceName, name, StringComparison.OrdinalIgnoreCase));
+            if (screen is not null) return screen.Bounds;
+        }
 
-        var screen = Screen.AllScreens.FirstOrDefault(s =>
-            string.Equals(s.DeviceName, name, StringComparison.OrdinalIgnoreCase));
+        if (status.Geometry is { } g && g.Width > 0)
+            return new Rectangle(g.X, g.Y, g.Width, g.Height);
 
-        return screen?.Bounds;
+        return null;
     }
 
     /// <summary>Start ordenado: só abre os programas depois que o monitor (e o surround) estão ativos.</summary>
@@ -804,13 +811,17 @@ internal sealed class TrayApp : ApplicationContext
         UiPlacement.RaiseAboveOverlays(_blendAdjust);
     }
 
-    /// <summary>Gama/ganho/largura do fade no próximo quadro, nas fatias dos projetores.</summary>
-    private void ApplyBlendLive(int overlap, double gamma, double gain)
+    /// <summary>Gama/ganho/fade no próximo quadro. Overposição no config só ao guardar — senão o watchdog redimensiona o canvas no meio do slide.</summary>
+    private void ApplyBlendLive(int overlap, double gamma, double gain) =>
+        ApplyBlendLive(overlap, gamma, gain, _config.SurroundAlignLeftX, _config.SurroundAlignRightX);
+
+    private void ApplyBlendLive(int overlap, double gamma, double gain, int alignLeftX, int alignRightX)
     {
-        _config.SurroundBlendOverlap = overlap;
         _config.SurroundBlendGamma = gamma;
         _config.SurroundBlendGain = gain;
-        _surround?.ApplyBlend(gamma, gain, overlap);
+        _config.SurroundAlignLeftX = alignLeftX;
+        _config.SurroundAlignRightX = alignRightX;
+        _surround?.ApplyBlend(gamma, gain, overlap, alignLeftX, alignRightX);
 
         if (_last?.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical })
         {

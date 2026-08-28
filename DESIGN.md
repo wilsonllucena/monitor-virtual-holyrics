@@ -224,21 +224,25 @@ não tem surround nativo sem NVIDIA Surround / AMD Eyefinity.
 
 Caminho escolhido:
 
-1. **NVIDIA Surround/Mosaic (preferido, GPU NVIDIA).** O driver junta as duas saídas
-   HDMI num único VidPN. O Windows — Configurações de vídeo, taskbar, Holyrics —
-   vê **um** monitor lógico (`Σ larguras − overlap`, ex. 3648×1080). A barra de
-   tarefas é uma faixa contínua no rodapé do telão, igual ao Surround feito no
-   painel NVIDIA. Overposição nativa (`overlapX` positivo); fade complementar via
-   `NvAPI_GPU_SetScanoutIntensity` quando o GPU deixa. O IddCx é **desconectado
-   do desktop** nesse modo, senão apareceria como tela extra.
-2. **Fallback (sem Mosaic / driver recusou).** CCD não faz span: só estende ou
-   clona, e IddCx não dirige HDMI físico. Aí o canvas virtual vira **primário**
-   no tamanho do telão, os projetores ficam ao lado, e o overlay recorta com
-   blend. A taskbar mora no canvas, então atravessa a parede nas fatias; o
-   Windows ainda lista as saídas físicas.
+1. **Canvas virtual = composição do Holyrics.** O slide (letra + fundo) é uma
+   imagem só, no tamanho `Σ larguras − overlap`. O preview captura esse canvas.
+   As fatias enviadas aos projetores são recorte **1:1** — a letra no telão
+   coincide com o monitor virtual.
+2. **Soft-edge na overposição física.** Cada projetor escurece a borda interna
+   (cosseno `pow(s, 1/gama)`). Os dois feixes somam ~1.0: some a **faixa branca**
+   da junta; a fonte não é apagada (é o mesmo pixel nos dois lados). Fade largo
+   demais escurece texto fora da faixa — o slider de overposição deve ter a
+   largura do fio branco na parede.
+3. **NVIDIA Surround/Mosaic (opcional, GPU NVIDIA).** Junta os HDMI num VidPN
+   para a taskbar atravessar. No GeForce o Mosaic **não** compartilha pixels nem
+   faz Warp&Blend (isso é Quadro). O span fica seco (3840×1080); o overlay cobre
+   as duas metades com o canvas virtual. O IddCx **permanece** ligado — se
+   desconectar, o Holyrics cai no span seco e a junta volta a brilhar.
+4. **Sem Mosaic.** O canvas virtual pode ser o primário; overlay nas saídas
+   físicas. 1 monitor não muda nada.
 
-`SurroundEnabled` é opt-in: 1 monitor não muda; 3 telas deixam o primário com o
-operador. Desligar o surround desfaz o Mosaic **só se este app o tiver ligado**.
+`SurroundEnabled` é opt-in. Desligar o surround desfaz o Mosaic **só se este app
+o tiver ligado**.
 
 Não dependemos do usuário abrir o painel NVIDIA: o app chama NVAPI
 (`SetDisplayGrids` / topo 1×2) ao ligar o telão.

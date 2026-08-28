@@ -112,33 +112,32 @@ Se os dois projetores mostram o **mesmo slide** lado a lado, o Windows (ou o
 Holyrics) está em **clone/espelho**. Não é surround: a imagem não estica, e a
 junta no meio fica uma costura clara.
 
-O Monitor Virtual faz o telão virar **um monitor só**, no mesmo espírito do
-NVIDIA Surround: a barra de tarefas atravessa a parede de ponta a ponta.
+O Monitor Virtual faz o telão virar **uma imagem só**: o Holyrics desenha no
+**monitor virtual** (é o preview que você confere) e o app manda a cada projetor
+a fatia correspondente, com **soft-edge blend** na junta.
 
-1. Detecta os projetores físicos.
-2. Sai do clone e força **Estender**.
-3. **Com GPU NVIDIA:** liga Surround/Mosaic nos dois HDMI. O Windows passa a
-   ver um monitor lógico (dois Full HD com blend de 192 px → **3648×1080**;
-   sem overposição → **3840×1080**). A taskbar é uma faixa só. O Holyrics
-   projeta nesse telão. O monitor virtual IddCx sai do desktop (não vira
-   tela extra).
-4. **Se o driver recusar o Mosaic:** o canvas virtual vira o **primário**
-   naquele tamanho, o app recorta esquerda/direita com **soft-edge blend**.
-   A taskbar mora no canvas, então também atravessa o telão na parede.
+1. Detecta os projetores físicos e sai do clone (**Estender**).
+2. O canvas virtual fica no tamanho do telão (dois Full HD com overposição de
+   192 px → **3648×1080**; sem overposição → **3840×1080**). O Holyrics projeta
+   **nessa tela só** (Tela pública = Virtual Display Driver).
+3. **Com GPU NVIDIA:** o driver pode juntar os dois HDMI num monitor lógico
+   (taskbar contínua). O GeForce **não** faz blend de projetor — só cola as
+   bordas. O app mesmo assim recorta as duas metades e aplica o fade.
+4. Cada projetor recebe os **mesmos pixels** na faixa de overposição, com
+   brilho complementar (cosseno compensado). Os dois feixes somam ~1.0: some a
+   **faixa branca**; a letra do Holyrics atravessa a junta, igual no preview.
 
 O preview no monitor do PC **não** é a verdade da parede. Dois projetores
-somam luz: uma curva que parece boa no preview deixa uma **faixa preta** no
-telão. Os sliders mexem nas fatias (ou no scanout NVIDIA), no próximo quadro.
+somam luz. Os sliders mexem nas fatias enviadas aos projetores, no próximo quadro.
 
 ### Como ligar
 
 1. Menu do ícone → **Ligar telão surround (2 projetores = 1 tela)**.
 2. Ou **Configurações → Telão surround / blending**: marque os dois projetores.
 3. **Feche e abra o Holyrics** (ou deixe o app abri-lo **depois** do surround).
-   Em **Projeção**, a Tela pública deve ser o **telão único** (no Surround
-   NVIDIA ele aparece como um monitor largo; no fallback, o Virtual Display
-   Driver). O app tenta apontar isso sozinho se o token da API estiver em
-   Configurações.
+   Em **Projeção**, a Tela pública deve ser o **Virtual Display Driver** (o
+   canvas da letra). O app tenta apontar isso sozinho se o token da API estiver
+   em Configurações.
 4. **Testar tela...**: no projetor esquerdo deve aparecer sobretudo **ESQUERDA**,
    no direito **DIREITA**. Se os dois mostram as duas palavras, ainda está em
    clone.
@@ -156,15 +155,18 @@ frente, na tela do operador):
 
 Mexa olhando a **parede**, não a janela de visualização:
 
-| Controle | O que faz | Faixa preta no meio | Costura clara |
+| Controle | O que faz | Faixa preta no meio | Faixa **branca** no meio |
 |---|---|---|---|
-| **Overposição (px)** | Largura do fade na junta (128–256 é o ponto de partida) | — | Aumente um pouco |
-| **Gama** | Compensa a gama da lâmpada. 2,2 clareia o overlap; 1,0 é linear | **Aumente** (2,2–2,8) | Diminua |
-| **Intensidade** | Ganho extra na zona de overlap | **Aumente** (> 1,00) | Diminua |
+| **Overposição (px)** | Largura do fade = largura da faixa na parede | — | Aumente até cobrir a faixa (32–96 se for um fio fino) |
+| **Gama** | Compensa a lâmpada. 2,2 clareia o overlap; 1,0 é linear | **Aumente** (2,2–2,8) | — |
+| **Intensidade** | Ganho extra na zona de overlap | **Aumente** (> 1,00) | **Diminua** (< 1,00) |
 
-Marque **Mostrar padrão de junta** (fundo branco): se o centro ficar mais
-escuro que as laterais, a curva ainda está baixa. Ajuste até a faixa sumir.
-**Fechar e guardar** grava em `config.json` — sem reinstalar.
+A letra **não** some: os dois projetores mostram o mesmo pedaço do slide, só o
+brilho cruza. Se o texto ao lado da junta escurecer, a overposição está maior
+que a faixa física — diminua.
+
+Marque **Mostrar padrão de junta** (fundo branco) só para acertar o centro.
+**Fechar e guardar** grava em `config.json` e aplica o tamanho do canvas.
 
 A **gama maior clareia** a junta nos projetores (compensação `pow(cosseno, 1/gama)`).
 A v0.2.0 usava a potência ao contrário e escurecia o meio.
@@ -204,10 +206,16 @@ Virtual Display Driver e oculta `screen_2`/`screen_3` que caíam nos projetores.
 Deixe o Monitor Virtual abrir o Holyrics (depois do surround). Se o Holyrics
 já estava aberto, use **Reiniciar programa** no menu depois do telão ligar.
 
+**Faixa branca vertical no meio do telão (letra alinhada, só a marcação brilha)**
+Os projetores estão sobrepostos e os dois feixes somam luz (~2.0) — a v0.3.0
+não aplicava o fade nas fatias quando o Surround NVIDIA estava ligado. Abra
+**Ajustar blend do telão**: a **overposição** deve ter a largura da faixa
+branca; a **intensidade** pode baixar um pouco. A fonte do Holyrics atravessa
+a junta (é o mesmo pixel nos dois lados); some só o fio branco.
+
 **Faixa preta vertical no meio do telão (preview no PC parece ok)**
 Dois projetores somam luz; o preview de monitor não. Abra **Ajustar blend do
-telão** (janela na barra de tarefas, ou duplo clique no ícone): aumente a **gama**
-(2,2–2,8) ou a **intensidade**, olhando a parede.
+telão**: aumente a **gama** (2,2–2,8) ou a **intensidade**, olhando a parede.
 Marque **Mostrar padrão de junta**. Os sliders valem no próximo quadro nas
 fatias físicas, sem reinstalar.
 
@@ -272,9 +280,10 @@ falta para o uso em igreja:
 - liga e desliga a tela habilitando o dispositivo — sem pedir UAC no dia a dia, graças a
   uma tarefa de logon elevada;
 - força a topologia **Estender**, a causa nº 1 de "o Holyrics não projeta";
-- **telão surround**: dois projetores viram um monitor lógico (NVIDIA Surround
-  quando o GPU deixa — taskbar contínua de ponta a ponta; senão canvas virtual
-  primário + blend nas saídas). Opt-in; 1 monitor não muda nada;
+- **telão surround**: Holyrics no canvas virtual; overlay com soft-edge nas
+  saídas (some a faixa branca da junta, a letra atravessa). NVIDIA Surround
+  é opcional (taskbar); o GeForce não faz blend — o fade é do app. Opt-in;
+  1 monitor não muda nada;
 - mantém **resolução e posição fixas**, para o Holyrics não perder a configuração da tela;
 - nunca deixa a tela virtual virar o monitor principal;
 - vigia e reprovisiona depois de suspensão, atualização de GPU ou mudança em `Win+P`;
@@ -336,7 +345,7 @@ mvcli watch           # watchdog em primeiro plano
 ### Instalação silenciosa (várias máquinas)
 
 ```powershell
-MonitorVirtualSetup-0.3.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
+MonitorVirtualSetup-0.3.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
 ```
 
 ## Assinatura de código e privacidade

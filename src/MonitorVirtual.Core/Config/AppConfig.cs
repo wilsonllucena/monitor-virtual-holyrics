@@ -67,6 +67,14 @@ public sealed class AppConfig
     /// <summary>Troca esquerda/direita se o Windows numerou os projetores ao contrário.</summary>
     public bool SurroundSwap { get; set; }
 
+    /// <summary>
+    /// Desloca a fatia no canvas (px). Positivo = conteúdo anda para a esquerda
+    /// no projetor. Serve para coincidir a letra da parede com o monitor virtual.
+    /// </summary>
+    public int SurroundAlignLeftX { get; set; }
+
+    public int SurroundAlignRightX { get; set; }
+
     /// <summary>DeviceName dos monitores do telão. Vazio = detecção automática.</summary>
     public List<string> SurroundDeviceNames { get; set; } = new();
 
@@ -158,6 +166,8 @@ public sealed class AppConfig
         SurroundBlendOverlap = Math.Clamp(SurroundBlendOverlap, 0, 960);
         SurroundBlendGamma = Math.Clamp(SurroundBlendGamma, 0.4, 3);
         SurroundBlendGain = Math.Clamp(SurroundBlendGain, 0.25, 2.5);
+        SurroundAlignLeftX = Math.Clamp(SurroundAlignLeftX, -480, 480);
+        SurroundAlignRightX = Math.Clamp(SurroundAlignRightX, -480, 480);
         SurroundOutputFps = Math.Clamp(SurroundOutputFps, 5, 60);
         SurroundDeviceNames ??= new();
 

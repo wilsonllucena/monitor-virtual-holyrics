@@ -498,12 +498,10 @@ internal sealed class SettingsForm : Form
 
         _surroundHint.Text = plan is null
             ? "Marque pelo menos 2 projetores. Com 1 tela o surround não liga."
-            : NvidiaSpan.IsAvailable
-                ? $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight}. GPU NVIDIA: o Windows passa a ver UM monitor " +
-                  "(taskbar de ponta a ponta, como o Surround do painel NVIDIA). " +
-                  "Se o driver recusar, o canvas virtual vira o primário e as fatias vão com blend."
-                : $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight} — canvas virtual primário (taskbar no telão) " +
-                  "e blend nas saídas. Olhe o TELÃO: faixa preta no meio → aumente gama ou intensidade.";
+            : $"Canvas {plan.CanvasWidth}×{plan.CanvasHeight}. Holyrics no monitor virtual; " +
+              "cada projetor recebe a fatia 1:1 com fade na junta. " +
+              "Faixa BRANCA no telão → overposição = largura da faixa. " +
+              "A letra atravessa a junta; some só a marcação.";
     }
 
     private void NotifyLiveBlend()
