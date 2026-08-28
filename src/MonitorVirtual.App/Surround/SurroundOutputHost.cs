@@ -6,10 +6,9 @@ using MonitorVirtual.Core.Surround;
 namespace MonitorVirtual.App.Surround;
 
 /// <summary>
-/// Captura o monitor virtual (canvas único do Holyrics) e pinta cada projetor
-/// com a fatia correspondente + soft-edge. Sem isto o Windows em clone manda
-/// o mesmo slide nos dois lados do telão.
-/// Gama/ganho/largura do fade aplicam-se às fatias físicas, não só ao preview.
+/// Captura o monitor virtual (canvas do Holyrics) e pinta cada projetor
+/// com a fatia 1:1 + soft-edge. A letra é a mesma do preview; o fade só
+/// tira a faixa branca da overposição física.
 /// </summary>
 internal sealed class SurroundOutputHost : IDisposable
 {
@@ -22,6 +21,9 @@ internal sealed class SurroundOutputHost : IDisposable
     private Bitmap? _canvas;
     private double _gamma = SoftEdgeCurve.DefaultGamma;
     private double _gain = SoftEdgeCurve.DefaultGain;
+    private int _fadePixels = 192;
+    private int _alignLeftX;
+    private int _alignRightX;
     private bool _paused;
     private bool _holdZOrder;
     private bool _captureFailing;
@@ -44,17 +46,20 @@ internal sealed class SurroundOutputHost : IDisposable
         _topMost.Tick += (_, _) => KeepOverlaysOnTop();
     }
 
-    public void Start(SurroundPlan plan, int fps, double gamma, double gain)
+    public void Start(SurroundPlan plan, int fps, double gamma, double gain, int alignLeftX = 0, int alignRightX = 0)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(SurroundOutputHost));
 
         _gamma = gamma;
         _gain = gain;
+        _fadePixels = plan.Overlap;
+        _alignLeftX = alignLeftX;
+        _alignRightX = alignRightX;
         _paused = false;
 
         if (_plan?.Key == plan.Key && _outputs.Count == plan.Slices.Count)
         {
-            ApplyBlend(gamma, gain, plan.Overlap);
+            ApplyBlend(gamma, gain, plan.Overlap, alignLeftX, alignRightX);
             SetFps(fps);
             _timer.Start();
             _topMost.Start();
@@ -84,29 +89,26 @@ internal sealed class SurroundOutputHost : IDisposable
     }
 
     /// <summary>
-    /// Atualiza gama, ganho e largura do fade nas fatias já enviadas aos projetores,
-    /// no próximo quadro — sem recriar janelas e sem mexer no canvas do Holyrics.
+    /// Atualiza gama, ganho, largura do fade e alinhamento nas fatias já enviadas
+    /// aos projetores, no próximo quadro — sem recriar janelas.
     /// </summary>
-    public void ApplyBlend(double gamma, double gain, int blendPixels)
+    public void ApplyBlend(double gamma, double gain, int blendPixels, int alignLeftX = 0, int alignRightX = 0)
     {
         _gamma = gamma;
         _gain = gain;
+        _fadePixels = blendPixels;
+        _alignLeftX = alignLeftX;
+        _alignRightX = alignRightX;
         if (_outputs.Count == 0) return;
 
-        for (var i = 0; i < _outputs.Count; i++)
-        {
-            var output = _outputs[i];
-            var maxPx = Math.Max(0, output.Slice.OutputWidth / 2);
-            var px = Math.Clamp(blendPixels, 0, maxPx);
-            var edge = BlendEdge.None;
-            if (px > 0)
-            {
-                if (i > 0) edge |= BlendEdge.Left;
-                if (i < _outputs.Count - 1) edge |= BlendEdge.Right;
-            }
+        var mapped = SurroundPlanner.MapSlicesToCanvas(
+            _outputs.Select(o => o.Slice).ToList(),
+            _plan?.CanvasWidth ?? _outputs.Sum(o => o.Slice.OutputWidth),
+            _plan?.CanvasHeight ?? _outputs[0].Slice.OutputHeight,
+            blendPixels, alignLeftX, alignRightX);
 
-            _outputs[i] = output with { Slice = output.Slice with { BlendPixels = px, BlendEdge = edge } };
-        }
+        for (var i = 0; i < _outputs.Count && i < mapped.Count; i++)
+            _outputs[i] = _outputs[i] with { Slice = mapped[i] };
     }
 
     /// <summary>
@@ -183,6 +185,17 @@ internal sealed class SurroundOutputHost : IDisposable
             foreach (var output in _outputs)
             {
                 output.Form.SetBounds(output.Slice);
+            }
+
+            var mapped = SurroundPlanner.MapSlicesToCanvas(
+                _outputs.Select(o => o.Slice).ToList(),
+                _canvas.Width, _canvas.Height,
+                _fadePixels, _alignLeftX, _alignRightX);
+
+            for (var i = 0; i < _outputs.Count && i < mapped.Count; i++)
+            {
+                var output = _outputs[i] with { Slice = mapped[i] };
+                _outputs[i] = output;
                 BlitSlice(_canvas, output);
                 output.Form.Present(output.Frame);
             }
@@ -219,17 +232,22 @@ internal sealed class SurroundOutputHost : IDisposable
     private void BlitSlice(Bitmap canvas, Output output)
     {
         var slice = output.Slice;
-        var src = new Rectangle(slice.SourceX, slice.SourceY, slice.SourceWidth, slice.SourceHeight);
-        src.Intersect(new Rectangle(0, 0, canvas.Width, canvas.Height));
-        if (src.Width <= 0 || src.Height <= 0) return;
+        var blit = SurroundPlanner.BlitRect(
+            slice.SourceX, slice.SourceY, slice.SourceWidth, slice.SourceHeight,
+            canvas.Width, canvas.Height);
 
         using (var g = Graphics.FromImage(output.Frame))
         {
             g.InterpolationMode = InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode = PixelOffsetMode.Half;
+            g.CompositingMode = CompositingMode.SourceCopy;
             g.Clear(Color.Black);
-            g.DrawImage(canvas, new Rectangle(0, 0, output.Frame.Width, output.Frame.Height),
-                src, GraphicsUnit.Pixel);
+            if (blit is not { } r) return;
+
+            g.DrawImage(canvas,
+                new Rectangle(r.DestX, r.DestY, r.SrcW, r.SrcH),
+                new Rectangle(r.SrcX, r.SrcY, r.SrcW, r.SrcH),
+                GraphicsUnit.Pixel);
         }
 
         SoftEdgeBlend.Apply(output.Frame, slice.BlendEdge, slice.BlendPixels, _gamma, _gain);

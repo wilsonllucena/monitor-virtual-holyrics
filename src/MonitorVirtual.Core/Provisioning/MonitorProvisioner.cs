@@ -114,9 +114,6 @@ public sealed class MonitorProvisioner
         if (cfg.SurroundEnabled)
             (width, height, surround) = ApplySurroundTopology(cfg, width, height);
 
-        if (surround is { Kind: SurroundSurfaceKind.NvidiaLogical })
-            return FinishNvidiaSpan(surround);
-
         if (!cfg.SurroundEnabled)
             NvidiaSpan.TryDisable();
 
@@ -230,21 +227,30 @@ public sealed class MonitorProvisioner
         var (x, y) = ComputePosition(cfg, width);
         _display.ApplyMode(virtName, width, height, cfg.RefreshRate, x, y);
 
+        if (surround is { Kind: SurroundSurfaceKind.NvidiaLogical })
+            return FinishNvidiaSpan(surround, keepVirtual: true);
+
         var status = GetStatus();
         return surround is null ? status : status with { Surround = surround };
     }
 
     /// <summary>
-    /// NVIDIA Surround: o Windows já vê um monitor só. Desconectamos o IddCx do
-    /// desktop para ele não aparecer como tela extra (Holyrics/taskbar no telão).
+    /// NVIDIA Surround: o Windows vê um monitor largo (taskbar contínua). O
+    /// canvas IddCx <b>permanece</b> — é nele que o Holyrics desenha a letra.
+    /// O overlay recorta esse canvas nas duas metades do span. Desconectar o
+    /// virtual (v0.3.0) fazia o Holyrics projetar no span seco e a junta
+    /// voltava a dividir o telão.
     /// </summary>
-    private ProvisionStatus FinishNvidiaSpan(SurroundSurface surround)
+    private ProvisionStatus FinishNvidiaSpan(SurroundSurface surround, bool keepVirtual)
     {
-        var virt = _display.FindVirtual();
-        if (virt is { Attached: true })
+        if (!keepVirtual)
         {
-            Log.Info($"Surround NVIDIA: desconectando {virt.DeviceName} do desktop (o telão já é o monitor único).");
-            _display.Detach(virt.DeviceName);
+            var virt = _display.FindVirtual();
+            if (virt is { Attached: true })
+            {
+                Log.Info($"Surround NVIDIA: desconectando {virt.DeviceName} do desktop.");
+                _display.Detach(virt.DeviceName);
+            }
         }
 
         var largest = _display.FindLargestPhysical();
@@ -257,14 +263,15 @@ public sealed class MonitorProvisioner
                 Width = largest.Value.Geometry.Width,
                 Height = largest.Value.Geometry.Height,
                 AdapterDeviceName = largest.Value.Adapter.DeviceName,
+                Summary = keepVirtual
+                    ? $"{largest.Value.Geometry.Width}x{largest.Value.Geometry.Height} NVIDIA + canvas virtual (letra 1:1, blend nas metades)"
+                    : surround.Summary,
             };
 
             var others = _display.ListPhysical()
                 .Where(m => !string.Equals(m.DeviceName, largest.Value.Adapter.DeviceName,
                     StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            // Sem mesa extra, o telão único é o primário (taskbar de ponta a ponta).
-            // Com operador, o primário fica na mesa.
             if (others.Count == 0 && !largest.Value.Adapter.Primary)
                 _display.MakePrimary(largest.Value.Adapter.DeviceName);
         }
@@ -276,6 +283,10 @@ public sealed class MonitorProvisioner
             Summary = surround.Summary,
         };
     }
+
+    private static SurroundMonitor ToSpanMonitor(SurroundSurface surface) =>
+        new(surface.AdapterDeviceName ?? @"\\.\DISPLAY1", "Telão", true,
+            surface.X, surface.Y, surface.Width, surface.Height);
 
     private static SurroundSurface OverlaySurface(int width, int height, string virtName) =>
         new(SurroundSurfaceKind.VirtualOverlay, 0, 0, width, height, virtName,
@@ -298,8 +309,22 @@ public sealed class MonitorProvisioner
         var already = NvidiaSpan.DetectActive();
         if (already is not null)
         {
-            Log.Info($"Surround NVIDIA já ativo: {already.Summary}.");
-            return (already.Width, already.Height, already);
+            var physicalNow = _display.ListPhysical();
+            var selectedNow = SurroundPlanner.SelectMonitors(physicalNow, cfg);
+            var spanMon = physicalNow.Count == 1
+                ? physicalNow[0]
+                : ToSpanMonitor(already);
+            var planNow = selectedNow.Count >= 2
+                ? SurroundPlanner.TryCreate(selectedNow, cfg.SurroundBlendOverlap, cfg.SurroundSwap,
+                    cfg.SurroundAlignLeftX, cfg.SurroundAlignRightX)
+                : SurroundPlanner.TryCreateFromLogicalSpan(
+                    spanMon, cfg.SurroundBlendOverlap, cfg.SurroundSwap,
+                    NvidiaSpan.NativeHalves().Left, NvidiaSpan.NativeHalves().Right,
+                    cfg.SurroundAlignLeftX, cfg.SurroundAlignRightX);
+            var canvasW = planNow?.CanvasWidth ?? already.Width;
+            var canvasH = planNow?.CanvasHeight ?? already.Height;
+            Log.Info($"Surround NVIDIA já ativo: {already.Summary}. Canvas Holyrics {canvasW}x{canvasH}.");
+            return (canvasW, canvasH, already);
         }
 
         var physical = _display.ListPhysical();
@@ -320,8 +345,9 @@ public sealed class MonitorProvisioner
         var nvidia = NvidiaSpan.TryEnable(plan.Monitors, plan.Overlap, cfg.RefreshRate);
         if (nvidia.Ok && nvidia.Surface is not null)
         {
-            Log.Info($"Surround: {nvidia.Surface.Summary}.");
-            return (nvidia.Surface.Width, nvidia.Surface.Height, nvidia.Surface);
+            Log.Info($"Surround: span NVIDIA {nvidia.Surface.Width}x{nvidia.Surface.Height}; " +
+                     $"canvas do Holyrics continua {plan.CanvasWidth}x{plan.CanvasHeight} (overlap {plan.Overlap} px).");
+            return (plan.CanvasWidth, plan.CanvasHeight, nvidia.Surface);
         }
 
         Log.Info($"Surround NVIDIA indisponível ({nvidia.Detail}); canvas virtual primário + blend nas saídas.");

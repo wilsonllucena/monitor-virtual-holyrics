@@ -23,7 +23,7 @@ internal sealed class BlendAdjustForm : Form
     private readonly Label _hint = new()
     {
         AutoSize = true,
-        MaximumSize = new Size(460, 0),
+        MaximumSize = new Size(468, 0),
         ForeColor = SystemColors.GrayText,
     };
     private readonly CheckBox _test = new()
@@ -53,25 +53,25 @@ internal sealed class BlendAdjustForm : Form
         MinimizeBox = false;
         TopMost = true;
         ShowInTaskbar = true;
-        ClientSize = new Size(500, 340);
+        ClientSize = new Size(500, 400);
         AutoScaleMode = AutoScaleMode.Dpi;
 
         var y = 16;
         Controls.Add(new Label
         {
-            Text = "Olhe a PAREDE, não o preview do PC. O preview de monitor mente: dois projetores somam luz.",
+            Text = "Olhe a PAREDE. A letra do Holyrics tem que continuar visível — some só a faixa da junta.",
             Left = 16, Top = y, AutoSize = true, MaximumSize = new Size(468, 0),
         });
         y += 40;
 
-        AddRow("Overposição (px)", _overlap, _overlapValue, ref y);
+        AddRow("Overposição (px) — largura da faixa no meio", _overlap, _overlapValue, ref y);
         AddRow("Gama (maior = junta mais clara)", _gamma, _gammaValue, ref y);
         AddRow("Intensidade da junta", _gain, _gainValue, ref y);
 
         _hint.Left = 16;
         _hint.Top = y;
         Controls.Add(_hint);
-        y += 48;
+        y += 72;
 
         _test.Left = 16;
         _test.Top = y;
@@ -133,8 +133,9 @@ internal sealed class BlendAdjustForm : Form
     private void UpdateHint()
     {
         _hint.Text =
-            "Faixa PRETA no meio → aumente a gama (2,2–2,8) ou a intensidade.\n" +
-            "Costura CLARA → diminua a gama. Largura demais “come” o slide; de menos deixa corte seco.";
+            "Faixa BRANCA no meio (luz dos dois projetores) → aumente a overposição até a largura da faixa, depois diminua a intensidade.\n" +
+            "Faixa PRETA → aumente a gama (2,2–2,8) ou a intensidade.\n" +
+            "Se a LETRA ao lado da junta escurecer, a overposição está grande demais — diminua. A fonte atravessa a junta; some só a marcação.";
     }
 
     private int Overlap => _overlap.Value;

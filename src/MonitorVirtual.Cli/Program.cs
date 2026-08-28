@@ -287,24 +287,18 @@ switch (command)
             {
                 var video = provisioner.GetStatus();
                 var geo = video.Geometry;
-                int x, y, w, h;
-                if (video.Surround is { } span)
-                {
-                    x = span.X; y = span.Y; w = span.Width; h = span.Height;
-                }
-                else if (geo is not null)
-                {
-                    x = geo.X; y = geo.Y; w = geo.Width; h = geo.Height;
-                }
-                else
+                if (geo is null)
                 {
                     Console.Error.WriteLine("Telão/monitor virtual inativo; não dá para apontar a Tela pública.");
                     return 1;
                 }
 
-                var projectors = video.Surround is { Kind: SurroundSurfaceKind.NvidiaLogical }
-                    ? Array.Empty<SurroundMonitor>()
-                    : SurroundPlanner.SelectMonitors(provisioner.Display.ListPhysical(), cfg);
+                var x = geo.X;
+                var y = geo.Y;
+                var w = geo.Width;
+                var h = geo.Height;
+
+                var projectors = SurroundPlanner.SelectMonitors(provisioner.Display.ListPhysical(), cfg);
                 var tela = await client.EnsureSinglePublicScreenAsync(cfg, x, y, w, h, projectors);
                 if (!tela.Ok)
                 {

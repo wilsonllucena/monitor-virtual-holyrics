@@ -6,7 +6,9 @@ namespace MonitorVirtual.App.Surround;
 
 /// <summary>
 /// Aplica o fade nas fatias enviadas aos projetores físicos (não no preview).
-/// Sem compensação de gama a junta soma menos que 1.0 na parede e fica preta.
+/// Multiplica o RGB — não apaga a letra: no overlap os dois lados mostram o
+/// mesmo pixel com ganhos complementares (soma ~1.0). Sem fade a junta fica
+/// branca (luz 2.0); sem compensação de gama, preta.
 /// </summary>
 internal static class SoftEdgeBlend
 {

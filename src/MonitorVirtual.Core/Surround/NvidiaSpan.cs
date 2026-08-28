@@ -105,32 +105,37 @@ public static class NvidiaSpan
         var freq = (uint)Math.Clamp(refreshRate, 24, 240);
         overlap = Math.Clamp(overlap, 0, (int)width - 8);
 
-        if (IsMatchingSpan(mapped, overlap, out var current))
+        // GeForce Surround junta as bordas SEM compartilhar pixels. Overlap nativo
+        // do Mosaic (3648) só existe em Quadro+Sync; no PC da igreja vira uma
+        // linha no meio. O span fica 3840 (corte seco) e o overlay aplica o blend.
+        var mosaicOverlap = 0;
+
+        if (IsMatchingSpan(mapped, mosaicOverlap, out var current) && current.Surface is { Width: >= 3200 })
             return current;
 
-        SaveRestorePoint(mapped);
+        SaveRestorePoint(mapped, (int)width, (int)height);
 
         var flagsToTry = new uint[]
         {
-            NvApi.GridFlagBezel | NvApi.GridFlagDriverReload,
-            NvApi.GridFlagBaseMosaic | NvApi.GridFlagBezel | NvApi.GridFlagDriverReload,
-            NvApi.GridFlagImmersiveGaming | NvApi.GridFlagBezel | NvApi.GridFlagDriverReload,
-            NvApi.GridFlagBezel,
-            NvApi.GridFlagBaseMosaic,
+            NvApi.GridFlagDriverReload,
+            NvApi.GridFlagBaseMosaic | NvApi.GridFlagDriverReload,
             0,
+            NvApi.GridFlagBaseMosaic,
+            NvApi.GridFlagImmersiveGaming | NvApi.GridFlagDriverReload,
+            NvApi.GridFlagBezel | NvApi.GridFlagDriverReload,
         };
 
         foreach (var flags in flagsToTry)
         {
-            var grids = BuildGrids(mapped, width, height, freq, overlap, flags);
+            var grids = BuildGrids(mapped, width, height, freq, mosaicOverlap, flags);
             var rc = NvApi.SetGrids(grids, NvApi.MosaicSetTopoCurrentGpu | NvApi.MosaicSetTopoAllowInvalid);
             if (rc == NvApi.Ok)
             {
                 Thread.Sleep(800);
-                if (IsMatchingSpan(mapped, overlap, out var surface))
+                if (IsMatchingSpan(mapped, mosaicOverlap, out var surface))
                 {
-                    MarkEnabledByUs(mapped.Select(m => m.DisplayId).ToArray(), overlap);
-                    Log.Info($"NVIDIA Surround ativo: {surface.Surface!.Summary} (flags=0x{flags:X}).");
+                    MarkEnabledByUs(mapped, overlap);
+                    Log.Info($"NVIDIA Surround ativo: {surface.Surface!.Summary} (flags=0x{flags:X}, span seco; blend no overlay).");
                     TryApplyScanoutBlend(mapped, overlap, SoftEdgeCurve.DefaultGamma, SoftEdgeCurve.DefaultGain);
                     return surface;
                 }
@@ -143,14 +148,14 @@ public static class NvidiaSpan
             }
         }
 
-        var topoRc = TryLegacy1x2(width, height, freq, overlap);
+        var topoRc = TryLegacy1x2(width, height, freq, mosaicOverlap);
         if (topoRc == NvApi.Ok)
         {
             Thread.Sleep(800);
-            if (IsMatchingSpan(mapped, overlap, out var surface))
+            if (IsMatchingSpan(mapped, mosaicOverlap, out var surface))
             {
-                MarkEnabledByUs(mapped.Select(m => m.DisplayId).ToArray(), overlap);
-                Log.Info($"NVIDIA Surround (topo 1x2) ativo: {surface.Surface!.Summary}.");
+                MarkEnabledByUs(mapped, overlap);
+                Log.Info($"NVIDIA Surround (topo 1x2) ativo: {surface.Surface!.Summary} (span seco; blend no overlay).");
                 return surface;
             }
         }
@@ -247,6 +252,14 @@ public static class NvidiaSpan
         return ok;
     }
 
+    public static (int Left, int Right, int Height) NativeHalves()
+    {
+        var state = LoadState();
+        if (state is { LeftWidth: > 0, RightWidth: > 0 })
+            return (state.LeftWidth, state.RightWidth, Math.Max(480, state.Height));
+        return (1920, 1920, 1080);
+    }
+
     public static bool Probe() => NvApi.IsAvailable;
 
     public static string? SelfTest()
@@ -332,7 +345,13 @@ public static class NvidiaSpan
 
             var canvasW = (int)(g.DisplaySettings.Width * g.Columns) - overlap * ((int)g.Columns - 1);
             if (g.Displays[0].OverlapX != 0)
+            {
+                // Pedimos span seco (overlap 0) e o driver ainda tem bezel/overlap:
+                // não é o alvo — o overlay de 1920+1920 não cabe num desktop 3648.
+                if (overlap == 0 && Math.Abs(g.Displays[0].OverlapX) > 16)
+                    continue;
                 canvasW = (int)(g.DisplaySettings.Width * g.Columns) - Math.Abs(g.Displays[0].OverlapX);
+            }
             var canvasH = (int)g.DisplaySettings.Height;
             if (canvasW < 640) canvasW = (int)(g.DisplaySettings.Width * g.Columns);
 
@@ -345,6 +364,9 @@ public static class NvidiaSpan
         var topoRc = NvApi.GetCurrentTopo(out var brief, out var setting, out var ox, out _);
         if (topoRc == NvApi.Ok && brief.Enabled != 0 && setting.Width > 0)
         {
+            if (overlap == 0 && Math.Abs(ox) > 16)
+                return false;
+
             var canvasW = (int)setting.Width * 2 - Math.Max(overlap, Math.Abs(ox));
             var surface = ReadLogicalSurface(canvasW, (int)setting.Height, mapped[0].Monitor.DeviceName);
             result = new NvidiaSpanResult(true, "topo Mosaic ativo", surface,
@@ -451,13 +473,26 @@ public static class NvidiaSpan
 
     private static int MarshalSizeIntensity() => Marshal.SizeOf<NvScanoutIntensityDataV1>();
 
-    private sealed record SpanState(bool EnabledByUs, uint[] DisplayIds, int Overlap);
+    private sealed record SpanState(
+        bool EnabledByUs,
+        uint[] DisplayIds,
+        int Overlap,
+        int LeftWidth = 1920,
+        int RightWidth = 1920,
+        int Height = 1080);
 
-    private static void SaveRestorePoint(IReadOnlyList<MappedDisplay> mapped) =>
-        WriteState(new SpanState(false, mapped.Select(m => m.DisplayId).ToArray(), 0));
+    private static void SaveRestorePoint(IReadOnlyList<MappedDisplay> mapped, int leftWidth, int height) =>
+        WriteState(new SpanState(false, mapped.Select(m => m.DisplayId).ToArray(), 0,
+            leftWidth, mapped.Count > 1 ? mapped[1].Monitor.Width : leftWidth, height));
 
-    private static void MarkEnabledByUs(uint[] ids, int overlap) =>
-        WriteState(new SpanState(true, ids, overlap));
+    private static void MarkEnabledByUs(IReadOnlyList<MappedDisplay> mapped, int overlap) =>
+        WriteState(new SpanState(
+            true,
+            mapped.Select(m => m.DisplayId).ToArray(),
+            overlap,
+            mapped[0].Monitor.Width,
+            mapped.Count > 1 ? mapped[1].Monitor.Width : mapped[0].Monitor.Width,
+            mapped[0].Monitor.Height));
 
     private static void WriteState(SpanState state)
     {
