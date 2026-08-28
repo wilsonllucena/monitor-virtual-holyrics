@@ -5,17 +5,18 @@ using MonitorVirtual.Core.Surround;
 namespace MonitorVirtual.App.Surround;
 
 /// <summary>
-/// Fade em cosseno + gama na borda da fatia. Os dois projetores somam ~1.0
-/// na overposição; sem isso a junta fica uma faixa clara (dois feixes no mesmo ponto).
+/// Aplica o fade nas fatias enviadas aos projetores físicos (não no preview).
+/// Sem compensação de gama a junta soma menos que 1.0 na parede e fica preta.
 /// </summary>
 internal static class SoftEdgeBlend
 {
-    public static void Apply(Bitmap bmp, BlendEdge edge, int pixels, double gamma)
+    public static void Apply(Bitmap bmp, BlendEdge edge, int pixels, double gamma, double gain)
     {
         if (bmp is null || pixels <= 0 || edge == BlendEdge.None) return;
 
         pixels = Math.Min(pixels, Math.Max(1, bmp.Width / 2));
-        var lut = BuildLut(pixels, gamma);
+        var lut = SoftEdgeCurve.BuildLut(pixels, gamma, gain);
+        if (lut.Length == 0) return;
 
         var rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
         var data = bmp.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppPArgb);
@@ -53,22 +54,6 @@ internal static class SoftEdgeBlend
         {
             bmp.UnlockBits(data);
         }
-    }
-
-    /// <summary>Índice 0 = borda externa (preto), último = interior (cheio).</summary>
-    private static float[] BuildLut(int pixels, double gamma)
-    {
-        var lut = new float[pixels];
-        var last = Math.Max(1, pixels - 1);
-        var g = (float)Math.Clamp(gamma, 1, 3);
-        for (var i = 0; i < pixels; i++)
-        {
-            var t = i / (float)last;
-            var s = 0.5f * (1f - MathF.Cos(t * MathF.PI));
-            lut[i] = MathF.Pow(s, g);
-        }
-
-        return lut;
     }
 
     private static void Multiply(byte[] bytes, int i, float f)

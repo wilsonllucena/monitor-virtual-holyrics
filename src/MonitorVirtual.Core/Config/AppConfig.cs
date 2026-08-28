@@ -37,8 +37,20 @@ public sealed class AppConfig
     /// <summary>Pixels de overposição na junta. 0 = corte seco; 128–256 para projetores.</summary>
     public int SurroundBlendOverlap { get; set; } = 192;
 
-    /// <summary>Gama do fade (2.2 é o padrão de projetor). Maior = junta mais escura.</summary>
+    /// <summary>
+    /// Gama da compensação do fade. 1.0 = cosseno linear (bom no monitor);
+    /// 2.2 clareia a junta na parede (dois projetores somam luz). Maior = junta mais clara.
+    /// </summary>
     public double SurroundBlendGamma { get; set; } = 2.2;
+
+    /// <summary>Multiplica o fade na overposição. &gt; 1 clareia a faixa preta no telão.</summary>
+    public double SurroundBlendGain { get; set; } = 1.0;
+
+    /// <summary>
+    /// Com surround ligado, aponta a Tela pública do Holyrics para o monitor virtual
+    /// e oculta telas extras que caem nos projetores (evita a imagem dividida).
+    /// </summary>
+    public bool SurroundSteerHolyrics { get; set; } = true;
 
     /// <summary>Taxa da saída nos projetores físicos.</summary>
     public int SurroundOutputFps { get; set; } = 24;
@@ -144,8 +156,8 @@ public sealed class AppConfig
         if (RefreshRate < 24) RefreshRate = 60;
         if (WatchdogSeconds is not 0 and < 2) WatchdogSeconds = 2;
         SurroundBlendOverlap = Math.Clamp(SurroundBlendOverlap, 0, 960);
-        if (SurroundBlendGamma < 1) SurroundBlendGamma = 1;
-        if (SurroundBlendGamma > 3) SurroundBlendGamma = 3;
+        SurroundBlendGamma = Math.Clamp(SurroundBlendGamma, 0.4, 3);
+        SurroundBlendGain = Math.Clamp(SurroundBlendGain, 0.25, 2.5);
         SurroundOutputFps = Math.Clamp(SurroundOutputFps, 5, 60);
         SurroundDeviceNames ??= new();
 

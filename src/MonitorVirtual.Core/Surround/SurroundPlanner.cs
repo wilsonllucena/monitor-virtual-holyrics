@@ -156,6 +156,8 @@ public static class SurroundPlanner
         if (!blend.Slices[0].BlendEdge.HasFlag(BlendEdge.Right) ||
             !blend.Slices[1].BlendEdge.HasFlag(BlendEdge.Left))
             return "bordas de blend invertidas";
+        if (blend.Slices[0].BlendPixels != 192)
+            return "BlendPixels da fatia não segue a overposição";
 
         var swapped = TryCreate(new[] { left, right }, 192, swap: true);
         if (swapped is null || swapped.Slices[0].DeviceName != right.DeviceName)

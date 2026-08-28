@@ -23,6 +23,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _restartItem;
     private readonly ToolStripMenuItem _surroundItem;
+    private readonly ToolStripMenuItem _blendItem;
 
     private AppConfig _config;
     private ProvisionStatus? _last;
@@ -30,6 +31,12 @@ internal sealed class TrayApp : ApplicationContext
     private SurroundOutputHost? _surround;
     private bool _busy;
     private bool _surroundHintShown;
+    private bool _holyricsSteerApplied;
+    private bool _holyricsSteerInFlight;
+    private int _holyricsSteerFailures;
+    private bool _holyricsSteerHintShown;
+    private BlendAdjustForm? _blendAdjust;
+    private TestScreenForm? _juntaTest;
 
     private readonly HashSet<string> _launched = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _needsRestart = new(StringComparer.OrdinalIgnoreCase);
@@ -55,12 +62,17 @@ internal sealed class TrayApp : ApplicationContext
 
         _surroundItem = new ToolStripMenuItem("Ligar telão surround (2 projetores = 1 tela)", null,
             (_, _) => ToggleSurround());
+        _blendItem = new ToolStripMenuItem("Ajustar blend do telão...", null, (_, _) => ShowBlendAdjust())
+        {
+            Enabled = false,
+        };
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_toggleItem);
         menu.Items.Add(_surroundItem);
+        menu.Items.Add(_blendItem);
         menu.Items.Add(new ToolStripMenuItem("Ver o monitor em uma janela", null, (_, _) => ShowPreview()));
         menu.Items.Add(new ToolStripMenuItem("Testar tela...", null, (_, _) => ShowTestScreen()));
         menu.Items.Add(_restartItem);
@@ -169,6 +181,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         _config.SurroundEnabled = !_config.SurroundEnabled;
         _config.Save();
+        _holyricsSteerApplied = false;
+        _holyricsSteerFailures = 0;
         RunReconcile();
     }
 
@@ -183,12 +197,14 @@ internal sealed class TrayApp : ApplicationContext
             ? "Desligar telão surround"
             : "Ligar telão surround (2 projetores = 1 tela)";
         _surroundItem.Checked = _config.SurroundEnabled;
+        _blendItem.Enabled = _config.SurroundEnabled;
 
         var physical = _provisioner.Display.ListPhysical();
 
         if (!_config.SurroundEnabled || !status.MonitorActive)
         {
             _surround?.Stop();
+            _holyricsSteerApplied = false;
 
             if (firstRun && !silent && !_config.SurroundEnabled && physical.Count >= 2 && !_surroundHintShown)
             {
@@ -204,6 +220,8 @@ internal sealed class TrayApp : ApplicationContext
         if (plan is null)
         {
             _surround?.Stop();
+            _holyricsSteerApplied = false;
+            _blendItem.Enabled = false;
             if (firstRun && !silent)
                 Notify("Surround ligado, mas precisa de 2 projetores físicos. Nada foi alterado.",
                     ToolTipIcon.Warning);
@@ -211,12 +229,88 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         _surround ??= new SurroundOutputHost(GetVirtualBounds);
-        _surround.Start(plan, _config.SurroundOutputFps, _config.SurroundBlendGamma);
+        _surround.Start(plan, _config.SurroundOutputFps, _config.SurroundBlendGamma, _config.SurroundBlendGain);
         _statusItem.Text = $"{status.Summary} · {plan.Summary}";
+        _blendItem.Enabled = true;
+
+        MaybeSteerHolyrics(silent);
 
         if (firstRun && !silent)
-            Notify($"Telão surround ativo: {plan.Summary}. No Holyrics, escolha a tela Virtual Display Driver.",
+            Notify($"Telão surround ativo: {plan.Summary}. No Holyrics, escolha a tela Virtual Display Driver. " +
+                   "Ajuste o blend pelo menu «Ajustar blend do telão», olhando a parede.",
                 ToolTipIcon.Info);
+    }
+
+    /// <summary>
+    /// Holyrics lista todos os monitores na abertura e costuma projetar nos dois
+    /// projetores (tela dividida). Apontamos a Tela pública para o canvas virtual
+    /// e ocultamos screen_2/3 que caem nas saídas físicas do telão.
+    /// </summary>
+    private void MaybeSteerHolyrics(bool silent)
+    {
+        if (!_config.SurroundEnabled || !_config.SurroundSteerHolyrics) return;
+        if (_holyricsSteerApplied || _holyricsSteerInFlight) return;
+        if (_surround is not { IsRunning: true }) return;
+
+        if (string.IsNullOrWhiteSpace(_config.HolyricsApiToken))
+        {
+            if (!silent && !_holyricsSteerHintShown && HolyricsClient.IsRunning())
+            {
+                _holyricsSteerHintShown = true;
+                Notify("Holyrics aberto com surround: cole o token da API em Configurações " +
+                       "para ele projetar só no monitor virtual (senão a tela divide nos dois projetores).",
+                    ToolTipIcon.Warning);
+            }
+            return;
+        }
+
+        if (!HolyricsClient.IsRunning()) return;
+
+        var virt = GetVirtualBounds();
+        if (virt is null) return;
+
+        var projectors = SurroundPlanner.SelectMonitors(_provisioner.Display.ListPhysical(), _config).ToList();
+        _holyricsSteerInFlight = true;
+        var cfg = _config.Clone();
+        var rect = virt.Value;
+
+        Task.Run(async () =>
+        {
+            HolyricsDisplayFixResult result;
+            try
+            {
+                result = await new HolyricsClient().EnsureSinglePublicScreenAsync(
+                    cfg, rect.X, rect.Y, rect.Width, rect.Height, projectors);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Falha ao apontar a Tela pública do Holyrics", ex);
+                result = new HolyricsDisplayFixResult(false, 0, ex.Message, null);
+            }
+
+            _marshal.BeginInvoke(() =>
+            {
+                _holyricsSteerInFlight = false;
+                if (!result.Ok)
+                {
+                    _holyricsSteerFailures++;
+                    Log.Warn($"Holyrics não apontado para o canvas único: {result.Error}");
+                    if (_holyricsSteerFailures >= 5)
+                        _holyricsSteerApplied = true;
+                    return;
+                }
+
+                _holyricsSteerApplied = true;
+                _holyricsSteerFailures = 0;
+                if (result.Changed && !silent)
+                    Notify(
+                        "Holyrics: Tela pública no monitor virtual (canvas único). " +
+                        (result.HiddenScreens > 0
+                            ? $"{result.HiddenScreens} tela(s) extra(s) nos projetores foram ocultadas."
+                            : "As duas saídas físicas não recebem mais o slide direto."),
+                        ToolTipIcon.Info);
+            });
+        });
     }
 
     /// <summary>
@@ -394,10 +488,21 @@ internal sealed class TrayApp : ApplicationContext
         return screen?.Bounds;
     }
 
-    /// <summary>Start ordenado: só abre os programas depois que o monitor está ativo.</summary>
+    /// <summary>Start ordenado: só abre os programas depois que o monitor (e o surround) estão ativos.</summary>
     private void MaybeLaunchApps(ProvisionStatus status)
     {
         if (!status.MonitorActive) return;
+
+        if (_config.SurroundEnabled)
+        {
+            var physical = _provisioner.Display.ListPhysical();
+            var plan = SurroundPlanner.TryCreate(physical, _config);
+            if (plan is not null && _surround is not { IsRunning: true })
+            {
+                Log.Info("Aguardando o telão surround ficar estável antes de abrir os programas.");
+                return;
+            }
+        }
 
         var started = new List<string>();
         foreach (var app in _config.ManagedApps.Where(a => a.LaunchAfterMonitor))
@@ -408,7 +513,18 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         if (started.Count > 0)
+        {
             Notify($"Monitor virtual pronto — {string.Join(" e ", started)} iniciado(s).", ToolTipIcon.Info);
+            if (_config.SurroundEnabled)
+            {
+                _holyricsSteerApplied = false;
+                _marshal.BeginInvoke(() =>
+                {
+                    Task.Delay(4000).ContinueWith(_ =>
+                        _marshal.BeginInvoke(() => MaybeSteerHolyrics(silent: false)));
+                });
+            }
+        }
     }
 
     private void Toggle()
@@ -420,11 +536,11 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ShowSettings()
     {
-        _surround?.Pause();
-        using var form = new SettingsForm(_config.Clone(), _provisioner);
+        var snapshot = _config.Clone();
+        using var form = new SettingsForm(_config.Clone(), _provisioner, ApplyBlendLive);
         if (form.ShowDialog() != DialogResult.OK)
         {
-            _surround?.Resume();
+            ApplyBlendLive(snapshot.SurroundBlendOverlap, snapshot.SurroundBlendGamma, snapshot.SurroundBlendGain);
             return;
         }
 
@@ -432,6 +548,8 @@ internal sealed class TrayApp : ApplicationContext
         _config.Save();
         _ndiBackgroundApplied = false;
         _ndiBackgroundFailures = 0;
+        _holyricsSteerApplied = false;
+        _holyricsSteerFailures = 0;
 
         _watchdog.Stop();
         if (_config.WatchdogSeconds > 0)
@@ -447,7 +565,64 @@ internal sealed class TrayApp : ApplicationContext
         RunReconcile();
     }
 
-    private void ShowTestScreen()
+    private void ShowBlendAdjust()
+    {
+        if (_blendAdjust is { IsDisposed: false })
+        {
+            _blendAdjust.WindowState = FormWindowState.Normal;
+            _blendAdjust.Activate();
+            return;
+        }
+
+        if (_surround is not { IsRunning: true })
+        {
+            MessageBox.Show(
+                "Ligue o telão surround com 2 projetores para ajustar o blend na parede.",
+                "Monitor Virtual", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        _blendAdjust = new BlendAdjustForm(
+            _config,
+            ApplyBlendLive,
+            showTest => ToggleJuntaTest(showTest),
+            () =>
+            {
+                _holyricsSteerApplied = false;
+                _config.Save();
+                RunReconcile();
+            });
+        _blendAdjust.FormClosed += (_, _) => _blendAdjust = null;
+        _blendAdjust.Show();
+    }
+
+    /// <summary>Gama/ganho/largura do fade no próximo quadro, nas fatias dos projetores.</summary>
+    private void ApplyBlendLive(int overlap, double gamma, double gain)
+    {
+        _config.SurroundBlendOverlap = overlap;
+        _config.SurroundBlendGamma = gamma;
+        _config.SurroundBlendGain = gain;
+        _surround?.ApplyBlend(gamma, gain, overlap);
+    }
+
+    private void ToggleJuntaTest(bool show)
+    {
+        if (!show)
+        {
+            if (_juntaTest is { IsDisposed: false })
+            {
+                _juntaTest.Close();
+                _juntaTest = null;
+            }
+            return;
+        }
+
+        ShowTestScreen(juntaWhite: true, stayOpen: true);
+    }
+
+    private void ShowTestScreen() => ShowTestScreen(juntaWhite: false, stayOpen: false);
+
+    private void ShowTestScreen(bool juntaWhite, bool stayOpen)
     {
         var status = _last ?? _provisioner.GetStatus();
         if (!status.MonitorActive || status.AdapterDeviceName is null)
@@ -467,7 +642,24 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        new TestScreenForm(screen, _config.SurroundEnabled ? _config.SurroundBlendOverlap : 0).Show();
+        if (_juntaTest is { IsDisposed: false })
+        {
+            _juntaTest.Close();
+            _juntaTest = null;
+        }
+
+        var form = new TestScreenForm(
+            screen,
+            _config.SurroundEnabled ? _config.SurroundBlendOverlap : 0,
+            stayOpen,
+            juntaWhite);
+        if (stayOpen)
+        {
+            _juntaTest = form;
+            form.FormClosed += (_, _) => { if (ReferenceEquals(_juntaTest, form)) _juntaTest = null; };
+        }
+
+        form.Show();
     }
 
     private void Repair()
@@ -534,6 +726,8 @@ internal sealed class TrayApp : ApplicationContext
         _watchdog.Stop();
         SystemEvents.DisplaySettingsChanged -= OnSystemChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        _blendAdjust?.Close();
+        _juntaTest?.Close();
         _surround?.Dispose();
         _surround = null;
         _tray.Visible = false;

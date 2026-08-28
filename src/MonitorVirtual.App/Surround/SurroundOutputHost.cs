@@ -9,41 +9,51 @@ namespace MonitorVirtual.App.Surround;
 /// Captura o monitor virtual (canvas único do Holyrics) e pinta cada projetor
 /// com a fatia correspondente + soft-edge. Sem isto o Windows em clone manda
 /// o mesmo slide nos dois lados do telão.
+/// Gama/ganho/largura do fade aplicam-se às fatias físicas, não só ao preview.
 /// </summary>
 internal sealed class SurroundOutputHost : IDisposable
 {
     private readonly Func<Rectangle?> _getSourceBounds;
     private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly System.Windows.Forms.Timer _topMost = new();
     private readonly List<Output> _outputs = new();
 
     private SurroundPlan? _plan;
     private Bitmap? _canvas;
-    private double _gamma = 2.2;
+    private double _gamma = SoftEdgeCurve.DefaultGamma;
+    private double _gain = SoftEdgeCurve.DefaultGain;
     private bool _paused;
     private bool _captureFailing;
     private bool _disposed;
 
     public bool IsRunning => _plan is not null && !_paused && _outputs.Count > 0;
     public string? Summary => _plan?.Summary;
+    public SurroundPlan? Plan => _plan;
 
     public SurroundOutputHost(Func<Rectangle?> getSourceBounds)
     {
         _getSourceBounds = getSourceBounds;
         _timer.Tick += (_, _) => CaptureAndPresent();
+        _topMost.Interval = 400;
+        _topMost.Tick += (_, _) => KeepOverlaysOnTop();
     }
 
-    public void Start(SurroundPlan plan, int fps, double gamma)
+    public void Start(SurroundPlan plan, int fps, double gamma, double gain)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(SurroundOutputHost));
 
         _gamma = gamma;
+        _gain = gain;
         _paused = false;
 
         if (_plan?.Key == plan.Key && _outputs.Count == plan.Slices.Count)
         {
+            ApplyBlend(gamma, gain, plan.Overlap);
             SetFps(fps);
             _timer.Start();
+            _topMost.Start();
             foreach (var output in _outputs) output.Form.Visible = true;
+            KeepOverlaysOnTop();
             return;
         }
 
@@ -61,14 +71,43 @@ internal sealed class SurroundOutputHost : IDisposable
         }
 
         _timer.Start();
+        _topMost.Start();
         CaptureAndPresent();
+        KeepOverlaysOnTop();
         Log.Info($"Saída surround iniciada: {plan.Summary}.");
+    }
+
+    /// <summary>
+    /// Atualiza gama, ganho e largura do fade nas fatias já enviadas aos projetores,
+    /// no próximo quadro — sem recriar janelas e sem mexer no canvas do Holyrics.
+    /// </summary>
+    public void ApplyBlend(double gamma, double gain, int blendPixels)
+    {
+        _gamma = gamma;
+        _gain = gain;
+        if (_outputs.Count == 0) return;
+
+        for (var i = 0; i < _outputs.Count; i++)
+        {
+            var output = _outputs[i];
+            var maxPx = Math.Max(0, output.Slice.OutputWidth / 2);
+            var px = Math.Clamp(blendPixels, 0, maxPx);
+            var edge = BlendEdge.None;
+            if (px > 0)
+            {
+                if (i > 0) edge |= BlendEdge.Left;
+                if (i < _outputs.Count - 1) edge |= BlendEdge.Right;
+            }
+
+            _outputs[i] = output with { Slice = output.Slice with { BlendPixels = px, BlendEdge = edge } };
+        }
     }
 
     public void Pause()
     {
         _paused = true;
         _timer.Stop();
+        _topMost.Stop();
         foreach (var output in _outputs) output.Form.Visible = false;
     }
 
@@ -78,11 +117,14 @@ internal sealed class SurroundOutputHost : IDisposable
         _paused = false;
         foreach (var output in _outputs) output.Form.Visible = true;
         _timer.Start();
+        _topMost.Start();
+        KeepOverlaysOnTop();
     }
 
     public void Stop()
     {
         _timer.Stop();
+        _topMost.Stop();
         _plan = null;
         StopForms();
     }
@@ -91,6 +133,12 @@ internal sealed class SurroundOutputHost : IDisposable
     {
         fps = Math.Clamp(fps, 5, 60);
         _timer.Interval = Math.Max(16, 1000 / fps);
+    }
+
+    private void KeepOverlaysOnTop()
+    {
+        if (_paused) return;
+        foreach (var output in _outputs) output.Form.KeepOnTop();
     }
 
     private void CaptureAndPresent()
@@ -153,7 +201,7 @@ internal sealed class SurroundOutputHost : IDisposable
                 src, GraphicsUnit.Pixel);
         }
 
-        SoftEdgeBlend.Apply(output.Frame, slice.BlendEdge, slice.BlendPixels, _gamma);
+        SoftEdgeBlend.Apply(output.Frame, slice.BlendEdge, slice.BlendPixels, _gamma, _gain);
     }
 
     private void StopForms()
@@ -175,6 +223,8 @@ internal sealed class SurroundOutputHost : IDisposable
         _disposed = true;
         _timer.Stop();
         _timer.Dispose();
+        _topMost.Stop();
+        _topMost.Dispose();
         StopForms();
         _canvas?.Dispose();
         _canvas = null;

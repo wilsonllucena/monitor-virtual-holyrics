@@ -168,6 +168,13 @@ switch (command)
             return 1;
         }
 
+        var curve = SoftEdgeCurve.SelfTest();
+        if (curve is not null)
+        {
+            Console.Error.WriteLine("Falha interna na curva de blend: " + curve);
+            return 1;
+        }
+
         var display = new DisplayService();
         var physical = display.ListPhysical();
         Console.WriteLine($"Monitores físicos: {physical.Count}");
@@ -180,7 +187,7 @@ switch (command)
 
         Console.WriteLine($"Surround         : {(cfg.SurroundEnabled ? "ligado" : "desligado")} " +
                           $"overlap={cfg.SurroundBlendOverlap}px gama={cfg.SurroundBlendGamma} " +
-                          $"inverter={cfg.SurroundSwap}");
+                          $"ganho={cfg.SurroundBlendGain} inverter={cfg.SurroundSwap}");
 
         var plan = SurroundPlanner.TryCreate(physical, cfg);
         if (plan is null)
@@ -214,6 +221,14 @@ switch (command)
             if (args[i].Equals("--overlap", StringComparison.OrdinalIgnoreCase) &&
                 int.TryParse(args[i + 1], out var overlap))
                 cfg.SurroundBlendOverlap = overlap;
+            if (args[i].Equals("--gamma", StringComparison.OrdinalIgnoreCase) &&
+                double.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var gamma))
+                cfg.SurroundBlendGamma = gamma;
+            if (args[i].Equals("--gain", StringComparison.OrdinalIgnoreCase) &&
+                double.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var gain))
+                cfg.SurroundBlendGain = gain;
         }
 
         cfg.Save();
@@ -226,6 +241,13 @@ switch (command)
 
     case "holyrics":
     {
+        var parse = HolyricsClient.SelfTestParse();
+        if (parse is not null)
+        {
+            Console.Error.WriteLine("Falha interna no parser de telas do Holyrics: " + parse);
+            return 1;
+        }
+
         var client = new HolyricsClient();
         var st = await client.GetStatusAsync(cfg);
         Console.WriteLine($"Processo em execução: {(st.ProcessRunning ? "sim" : "não")}");
@@ -234,6 +256,38 @@ switch (command)
 
         if (st.ApiReachable)
         {
+            var displays = await client.ListDisplaysAsync(cfg);
+            foreach (var screen in displays)
+            {
+                Console.WriteLine(
+                    $"Tela {screen.Id,-14} {screen.Name}  " +
+                    $"origem={screen.Screen ?? $"{screen.AreaX},{screen.AreaY}"}  " +
+                    $"{screen.AreaW}x{screen.AreaH}  hide={screen.Hide}");
+            }
+
+            if (args.Any(a => a.Equals("--tela-unica", StringComparison.OrdinalIgnoreCase)))
+            {
+                var geo = provisioner.GetStatus().Geometry;
+                if (geo is null)
+                {
+                    Console.Error.WriteLine("Monitor virtual inativo; não dá para apontar a Tela pública.");
+                    return 1;
+                }
+
+                var projectors = SurroundPlanner.SelectMonitors(provisioner.Display.ListPhysical(), cfg);
+                var tela = await client.EnsureSinglePublicScreenAsync(
+                    cfg, geo.X, geo.Y, geo.Width, geo.Height, projectors);
+                if (!tela.Ok)
+                {
+                    Console.Error.WriteLine("Não foi possível apontar a Tela pública: " + tela.Error);
+                    return 1;
+                }
+
+                Console.WriteLine(tela.Changed
+                    ? $"Tela pública no canvas virtual. {tela.Detail}"
+                    : "Tela pública já estava no canvas único.");
+            }
+
             var outputs = await client.ListNdiAsync(cfg);
             if (outputs.Count == 0)
             {
@@ -304,8 +358,10 @@ switch (command)
               watch                       roda o watchdog em primeiro plano
               apps [--detect]             lista (e detecta) os programas que usam o monitor
               launch                      abre os programas configurados, se o monitor estiver ativo
-              holyrics [--ndi-fundo]      testa a API; --ndi-fundo inclui o papel de fundo no NDI
-              surround [--on|--off] [--overlap 192]
+              holyrics [--ndi-fundo] [--tela-unica]
+                                          testa a API; --ndi-fundo inclui o papel de fundo no NDI;
+                                          --tela-unica aponta a Tela pública ao monitor virtual
+              surround [--on|--off] [--overlap 192] [--gamma 2.2] [--gain 1]
                                           detecta projetores e mostra o plano do telão único
               startup-on | startup-off    início automático elevado no logon
             """);
@@ -351,7 +407,7 @@ static void PrintStatus(MonitorProvisioner provisioner, AppConfig cfg)
     Console.WriteLine($"Geometria        : {(st.Geometry is null ? "-" : $"{st.Geometry.Width}x{st.Geometry.Height}@{st.Geometry.RefreshRate}Hz em ({st.Geometry.X},{st.Geometry.Y})")}");
     Console.WriteLine($"Desejado         : {cfg.ResolutionText}, lado {cfg.Side}, ligado={cfg.Enabled}");
     Console.WriteLine($"Surround         : {(cfg.SurroundEnabled ? "ligado" : "desligado")} " +
-                      $"(overlap {cfg.SurroundBlendOverlap}px)");
+                      $"(overlap {cfg.SurroundBlendOverlap}px gama {cfg.SurroundBlendGamma} ganho {cfg.SurroundBlendGain})");
     Console.WriteLine($"Início automático: {(StartupTask.Exists() ? "configurado" : "não configurado")}");
     Console.WriteLine($"Holyrics rodando : {(HolyricsClient.IsRunning() ? "sim" : "não")}");
     Console.WriteLine($"Logs             : {AppPaths.LogDir}");
