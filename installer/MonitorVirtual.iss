@@ -4,7 +4,7 @@
 
 #define MyAppName "Monitor Virtual para Holyrics"
 #define MyAppShortName "Monitor Virtual"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "Wilson Lima"
 #define MyAppUrl "https://github.com/wilsonllucena/monitor-virtual-holyrics"
 #define MyAppExe "MonitorVirtual.exe"

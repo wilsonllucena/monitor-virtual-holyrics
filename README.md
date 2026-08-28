@@ -81,6 +81,7 @@ Clique no ícone do Monitor Virtual perto do relógio:
 |---|---|
 | **Ligar / desligar monitor virtual** | Cria ou remove a tela na hora, sem pedir senha |
 | **Ligar / desligar telão surround** | Dois projetores viram **uma tela só**, com blend na junta |
+| **Ajustar blend do telão...** | Sliders de overposição, gama e intensidade — valem **ao vivo no projetor** |
 | **Ver o monitor em uma janela** | Espelha a tela virtual numa janela — acompanhe a projeção sem projetor |
 | **Testar tela...** | Mostra barras coloridas (ou o padrão ESQUERDA/DIREITA no surround) |
 | **Reiniciar programa** | Aparece quando o Holyrics abriu antes do monitor; reinicia ele para reconhecer a tela |
@@ -109,24 +110,46 @@ O Monitor Virtual resolve isso sem NVIDIA Surround e sem o Resolume:
 2. Sai do clone e força **Estender**.
 3. Cria um canvas único no monitor virtual (dois Full HD com blend de 192 px →
    **3648×1080**; sem overposição → **3840×1080**).
-4. O Holyrics projeta **uma tela só** nesse canvas.
+4. O Holyrics projeta **uma tela só** nesse canvas (Tela pública = Virtual
+   Display Driver). Telas extras que caíam nos projetores são ocultadas.
 5. O app recorta a metade esquerda/direita para cada projetor e aplica
    **soft-edge blend** na junta — os pixels da overposição são os mesmos nos
    dois lados, só o brilho cruza.
 
+O preview no monitor do PC **não** é a verdade da parede. Dois projetores
+somam luz: uma curva que parece boa no preview deixa uma **faixa preta** no
+telão. Os sliders mexem nas fatias enviadas aos projetores, no próximo quadro.
+
 ### Como ligar
 
 1. Menu do ícone → **Ligar telão surround (2 projetores = 1 tela)**.
-2. Ou **Configurações → Telão surround / blending**: marque os dois projetores,
-   ajuste a **overposição** (comece em 192 px) e a **gama** (2,2).
-3. **Feche e abra o Holyrics** (ou deixe o app abri-lo). Em **Projeção**,
-   escolha **Virtual Display Driver** — é a tela larga, não um dos projetores.
+2. Ou **Configurações → Telão surround / blending**: marque os dois projetores.
+3. **Feche e abra o Holyrics** (ou deixe o app abri-lo **depois** do surround).
+   Em **Projeção**, a Tela pública deve ser o **Virtual Display Driver** — o
+   app tenta apontar isso sozinho se o token da API estiver em Configurações.
 4. **Testar tela...**: no projetor esquerdo deve aparecer sobretudo **ESQUERDA**,
    no direito **DIREITA**. Se os dois mostram as duas palavras, ainda está em
    clone.
-5. Se a junta continua clara, **aumente** a overposição; se aparece uma faixa
-   escura, **diminua**. Marque **Inverter esquerda/direita** se os lados saíram
-   trocados.
+
+### Ajustar a junta até ficar invisível (olhe o TELÃO)
+
+Menu → **Ajustar blend do telão...** (janela pequena, sempre visível). Mexa
+olhando a **parede**, não a janela de visualização:
+
+| Controle | O que faz | Faixa preta no meio | Costura clara |
+|---|---|---|---|
+| **Overposição (px)** | Largura do fade na junta (128–256 é o ponto de partida) | — | Aumente um pouco |
+| **Gama** | Compensa a gama da lâmpada. 2,2 clareia o overlap; 1,0 é linear | **Aumente** (2,2–2,8) | Diminua |
+| **Intensidade** | Ganho extra na zona de overlap | **Aumente** (> 1,00) | Diminua |
+
+Marque **Mostrar padrão de junta** (fundo branco): se o centro ficar mais
+escuro que as laterais, a curva ainda está baixa. Ajuste até a faixa sumir.
+**Salvar e aplicar** / fechar o painel grava em `config.json` — sem reinstalar.
+
+A **gama maior clareia** a junta nos projetores (compensação `pow(cosseno, 1/gama)`).
+A v0.2.0 usava a potência ao contrário e escurecia o meio.
+
+Se os lados saíram trocados, marque **Inverter esquerda/direita**.
 
 Com **1 monitor** o surround não faz nada. Com **3 telas** (mesa + 2 projetores)
 o primário fica com o operador e só os projetores entram no telão.
@@ -145,6 +168,20 @@ Isso é clone, não surround. Ligue **Telão surround** no menu, confirme que o
 Holyrics está projetando no **Virtual Display Driver** e use **Testar tela...**.
 Ajuste a overposição até a costura do meio sumir. Com 1 monitor o surround
 não altera nada.
+
+**Abri o Holyrics e o telão voltou a ficar dividido**
+O Holyrics lista os monitores na abertura e costuma escolher os dois projetores
+físicos em vez do canvas único. O app, com o token da API em
+**Configurações → Holyrics — API local**, aponta a **Tela pública** para o
+Virtual Display Driver e oculta `screen_2`/`screen_3` que caíam nos projetores.
+Deixe o Monitor Virtual abrir o Holyrics (depois do surround). Se o Holyrics
+já estava aberto, use **Reiniciar programa** no menu depois do telão ligar.
+
+**Faixa preta vertical no meio do telão (preview no PC parece ok)**
+Dois projetores somam luz; o preview de monitor não. Menu → **Ajustar blend do
+telão**: aumente a **gama** (2,2–2,8) ou a **intensidade**, olhando a parede.
+Marque **Mostrar padrão de junta**. Os sliders valem no próximo quadro nas
+fatias físicas, sem reinstalar.
 
 **No Resolume a letra do Holyrics aparece e o fundo some (preview em xadrez)**
 Isso não é o monitor virtual: é a saída **NDI nativa do Holyrics** (v2.29+), que
@@ -201,7 +238,8 @@ falta para o uso em igreja:
   uma tarefa de logon elevada;
 - força a topologia **Estender**, a causa nº 1 de "o Holyrics não projeta";
 - **telão surround**: dois projetores viram um canvas único com soft-edge blend na junta
-  (opt-in; 1 monitor não muda nada);
+  (opt-in; 1 monitor não muda nada); gama/ganho ajustáveis ao vivo nas fatias físicas;
+  Holyrics é apontado para a Tela pública no monitor virtual;
 - mantém **resolução e posição fixas**, para o Holyrics não perder a configuração da tela;
 - nunca deixa a tela virtual virar o monitor principal;
 - vigia e reprovisiona depois de suspensão, atualização de GPU ou mudança em `Win+P`;
@@ -254,15 +292,16 @@ mvcli displays        # todas as telas e suas geometrias
 mvcli on | off        # liga/desliga (precisa de Administrador)
 mvcli apps --detect   # encontra Holyrics, Resolume, OBS
 mvcli holyrics --ndi-fundo  # inclui o papel de fundo na saída NDI
+mvcli holyrics --tela-unica # Tela pública = monitor virtual (some a divisão)
 mvcli surround        # detecta projetores e mostra o canvas único
-mvcli surround --on --overlap 192
+mvcli surround --on --overlap 192 --gamma 2.2 --gain 1
 mvcli watch           # watchdog em primeiro plano
 ```
 
 ### Instalação silenciosa (várias máquinas)
 
 ```powershell
-MonitorVirtualSetup-0.2.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
+MonitorVirtualSetup-0.2.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart
 ```
 
 ## Assinatura de código e privacidade
